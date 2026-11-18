@@ -1,0 +1,114 @@
+[
+  {
+    "name": "video_minimal",
+    "modality": "video",
+    "spec": {
+      "kind": "per_video",
+      "second_price": {
+        "720p": 12000
+      },
+      "max_seconds": 10
+    }
+  },
+  {
+    "name": "video_full",
+    "modality": "video",
+    "spec": {
+      "kind": "per_video",
+      "second_price": {
+        "480p": 9600,
+        "720p": 12000,
+        "1080p": 18000
+      },
+      "resolution_fixed": "720p",
+      "max_seconds": 30,
+      "ref_image_price": 100000,
+      "ref_image_free": 5,
+      "ref_audio_price": 50000,
+      "long_after_seconds": 15,
+      "long_video_multiplier": 2000000
+    }
+  },
+  {
+    "name": "video_ref_clip",
+    "modality": "video",
+    "spec": {
+      "kind": "per_video",
+      "second_price": {
+        "720p": 12000
+      },
+      "ref_video_price": 40000,
+      "max_seconds": 10
+    }
+  },
+  {
+    "name": "video_ref_second",
+    "modality": "video",
+    "spec": {
+      "kind": "per_video",
+      "second_price": {
+        "720p": 12000
+      },
+      "ref_video_second_price": {
+        "720p": 12000,
+        "2k": 20000
+      },
+      "max_seconds": 10
+    }
+  },
+  {
+    "name": "video_auto_duration",
+    "modality": "video",
+    "spec": {
+      "kind": "per_video",
+      "second_price": {
+        "720p": 12000
+      },
+      "resolution_fixed": "720p",
+      "max_seconds": 30,
+      "allow_auto_duration": true
+    }
+  },
+  {
+    "name": "image_minimal",
+    "modality": "image",
+    "spec": {
+      "kind": "per_image",
+      "tier_price": {
+        "1K": 200000
+      },
+      "resolution_fixed": "1K",
+      "max_n": 4
+    }
+  },
+  {
+    "name": "image_free",
+    "modality": "image",
+    "spec": {
+      "kind": "per_image",
+      "tier_price": {
+        "1K": 0
+      },
+      "resolution_fixed": "1K",
+      "max_n": 1
+    }
+  },
+  {
+    "name": "audio_second",
+    "modality": "audio",
+    "spec": {
+      "kind": "per_second",
+      "per_second_price": 1000,
+      "min_price": 100000,
+      "max_seconds": 600
+    }
+  },
+  {
+    "name": "music_task",
+    "modality": "music",
+    "spec": {
+      "kind": "per_task",
+      "per_task_price": 100000
+    }
+  }
+]

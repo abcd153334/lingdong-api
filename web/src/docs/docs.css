@@ -1,0 +1,1719 @@
+/* ============================================================
+   文档站样式（唯一一份，只服务 web/src/docs/）
+   ------------------------------------------------------------
+   规则：这里所有类都以 `d-` 开头，且只在 `.d-root` 之内生效 ——
+   文档站不读写全局 `components.css`，任何后台/门户的卡片、按钮、
+   表格样式调整都不会渗进这一页，反之亦然。
+
+   色板直接取 tokens.css 的设计令牌（原型自己也写明「与 tokens.css 同源」）：
+   --bg / --card / --card-2 / --border / --t1..t3 / --primary / --r-* / --mono。
+   这样亮暗两套主题都自动跟随，不需要在这里再维护第二份配色。
+   ============================================================ */
+
+.d-root {
+  --d-line: var(--border);
+  /* 分隔线（行与行之间）：不能用 --card-2 —— 那是「比卡片略深一点的背景」，
+     贴在同色卡片上几乎看不见。用 border 与 card 混一半，亮暗两套都有对比度。 */
+  --d-line-2: color-mix(in srgb, var(--border) 55%, var(--card));
+  --d-code-bg: #1e1f26;
+  --d-code-tx: #e6e8ef;
+  --d-sh: var(--sh-xs);
+  /* 标签前景：把语义色朝「正文色」混一档。
+     亮色下 --t1 是深灰 ⇒ 得到可读的深橙/深绿；暗色下 --t1 是近白 ⇒ 自动变亮。
+     不手写第二份亮暗色板（那是重复真相源），也不需要 light-dark()。 */
+  --d-warn-tx: color-mix(in srgb, var(--warning) 62%, var(--t1));
+  --d-ok-tx: color-mix(in srgb, var(--success) 62%, var(--t1));
+  --d-info-tx: color-mix(in srgb, var(--info) 62%, var(--t1));
+  --d-post: #6366f1;
+  --d-get: #10b981;
+  --d-del: #ef4444;
+  min-height: 100vh;
+  background: var(--bg);
+  color: var(--t1);
+  font-size: 14px;
+  -webkit-font-smoothing: antialiased;
+}
+
+html[data-theme="dark"] .d-root {
+  --d-code-bg: #0b0e16;
+  --d-code-tx: #e5e7eb;
+}
+
+/* ── 移动顶栏 ── */
+.d-topbar {
+  display: none;
+}
+
+/* ── 三栏骨架 ──
+   整页定高一屏，三栏各自滚动：页面本身不再滚 → 页面级自绘条（.pg-sb）因
+   scrollHeight≈clientHeight 自动隐藏，右栏那条就只剩自己的原生条，不再与它重叠。
+
+   为什么不是「让右栏隐藏滚动条」：那样拖页面条滚的是整页、滚轮在右栏上又只滚
+   右栏，拖拽与滚轮行为不一致（更隐蔽的错）。 */
+.d-app {
+  display: flex;
+  height: 100vh;
+  height: 100dvh; /* 移动浏览器地址栏收起时不留白；不支持 dvh 时回落到 vh */
+  overflow: hidden;
+}
+.d-side {
+  width: 280px;
+  flex: none;
+  /* 不再 sticky：父级已定高，列本来就是满高，sticky 没有可粘的滚动容器 */
+  position: relative;
+  height: 100%;
+  /* 滚动下沉到 .d-side-list：页脚（下载全站 Markdown）必须常驻，不能被菜单穿过去 */
+  overflow: hidden;
+  /* 横向内边距下放给子元素：滚动条才会贴面板右缘，而不是浮在内侧 10px 处 */
+  padding: 12px 0 0;
+  display: flex;
+  flex-direction: column;
+  background: var(--card);
+  border-right: 1px solid var(--d-line);
+  z-index: 30;
+}
+.d-main {
+  flex: 1;
+  min-width: 0;
+  height: 100%;
+  overflow-y: auto;
+  /* 滚到底不把滚动链传给页面（页面本来也滚不动，但触控板惯性会试图传） */
+  overscroll-behavior: contain;
+  padding: 26px 32px 120px;
+}
+.d-main-in {
+  /* 上限 820（原型）：超过这个宽度的正文，眼睛回行会丢行。
+     靠左而不是居中：1600 下接口页可用宽 854、说明页 1256，auto 会让 820 的列
+     在两页里偏移不同 ⇒ 切页正文横跳 196px。左对齐后左缘恒为 280+32=312。 */
+  max-width: 820px;
+  margin: 0;
+}
+.d-rail {
+  width: 392px;
+  flex: none;
+  height: 100%;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 18px 16px 60px;
+  background: var(--card);
+  border-left: 1px solid var(--d-line);
+}
+
+/* ── 侧栏：品牌 / 搜索 / 级联 ── */
+/* ── 侧栏：品牌 / 搜索 / 级联 ──
+   横向网格：面板边 0 → 盒子 10 → 文字 18。
+   侧栏自身不再有横向内边距（docs.css 的 .d-side 已改成 `12px 0 0`），
+   三段的横向内边距各自声明，滚动条才能贴到面板右缘。 */
+.d-side-brand {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 4px 10px 12px;
+}
+/* 品牌链接吃掉剩余宽度：这样管理入口与关闭按钮靠右排，不需要两个 margin-left:auto
+   （两个 auto 会平分剩余空间，把管理入口挤到中间）。 */
+.d-brand-home {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  flex: 1;
+  min-width: 0;
+  color: inherit;
+  text-decoration: none;
+}
+.d-brand-home:hover .d-brand-tx b {
+  color: var(--primary);
+}
+.d-brand-admin {
+  flex: none;
+  margin-left: 8px;
+  font-size: 11px;
+  line-height: 18px;
+  padding: 0 7px;
+  border: 1px solid var(--d-line);
+  border-radius: 6px;
+  color: var(--t3);
+  text-decoration: none;
+  white-space: nowrap;
+}
+.d-brand-admin:hover {
+  color: var(--primary);
+  border-color: var(--primary);
+}
+/* 品牌标：不再铺渐变底。
+   有图时图片本身就是标（透明 PNG / 方形截图会沿圆角露出紫色底边）；
+   没图时降级为站名首字，用正文字色而不是白字 —— 白字只有在有底时才看得见。
+   尺寸与对齐保持不变，避免品牌区高度跟着变。 */
+.d-brand-logo {
+  width: 28px;
+  height: 28px;
+  border-radius: 8px;
+  color: var(--t1);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 15px;
+  font-weight: 700;
+  flex: none;
+  overflow: hidden;
+}
+.d-brand-logo img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+.d-brand-tx {
+  min-width: 0;
+}
+.d-brand-tx b {
+  display: block;
+  font-size: 13.5px;
+  font-weight: 650;
+  line-height: 1.3;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.d-brand-tx span {
+  font-size: 11px;
+  color: var(--t3);
+}
+.d-side-x {
+  display: none;
+  margin-left: 6px; /* 不用 auto：品牌链接已 flex:1 撑开，两个 auto 会平分剩余空间 */
+  width: 28px;
+  height: 28px;
+  align-items: center;
+  justify-content: center;
+  border-radius: 7px;
+  color: var(--t3);
+  font-size: 15px;
+  background: none;
+  border: 0;
+  cursor: pointer;
+}
+.d-side-x:hover {
+  background: var(--bg);
+  color: var(--t1);
+}
+
+.d-side-search {
+  padding: 0 10px 10px; /* 输入框边框落在盒子网格 10，与 .d-sec-h 行背景左缘齐平 */
+}
+/* 图标 / 清除键 / 下拉都相对输入框定位，不再跟着外层 padding 换算。 */
+.d-search-box {
+  position: relative;
+}
+/* 选择器必须带 [type]：全局控件规则写的是 `input[type="search"]`（0,1,1），
+   与 `.d-side-search input`（0,1,1）同权重 —— 谁后加载谁赢。docs.css 是组件级
+   导入，顺序不可控，结果就是搜索框被套上 --ctl-h（42px）+ `padding:0 13px`，
+   文字压在图标下面。这里 (0,2,1) 直接压过它，不靠导入顺序。
+   高度取 34：与侧栏 .d-sec-h 行同高，面板里三种行（板块头 / 节点 / 搜索）一条基线。 */
+.d-side-search input[type="search"] {
+  width: 100%;
+  height: 34px;
+  border: 1px solid var(--d-line);
+  border-radius: 8px;
+  /* 左 = 图标 9 + 14 + 7；右 = 快捷键胶囊 8 + 16 + 6：两边都要给内容让位 */
+  padding: 0 30px;
+  font-size: 12.5px;
+  background: var(--card);
+  color: var(--t1);
+}
+.d-side-search input[type="search"]:focus {
+  outline: 0;
+  border-color: var(--primary);
+  box-shadow: 0 0 0 3px var(--primary-bg);
+}
+.d-side-search input[type="search"]::-webkit-search-cancel-button {
+  -webkit-appearance: none;
+}
+/* 图标垂直居中的唯一写法：撑满输入框高度再 flex 居中。
+   写 top:9px 是按 33px 盒硬算的，一旦输入框高度变了图标就贴到上沿。 */
+.d-search-ico {
+  position: absolute;
+  left: 9px;
+  top: 0;
+  bottom: 0;
+  display: flex;
+  align-items: center;
+  color: var(--t3);
+  pointer-events: none; /* 点在图标上也要能聚焦到输入框 */
+}
+.d-search-ico svg {
+  display: block;
+}
+.d-search-kbd {
+  position: absolute;
+  right: 8px;
+  top: 50%;
+  transform: translateY(-50%);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 16px;
+  height: 16px;
+  font-family: var(--mono);
+  font-size: 10px;
+  line-height: 1;
+  color: var(--t3);
+  border: 1px solid var(--d-line);
+  border-radius: 4px;
+  padding: 0 3px;
+  background: var(--bg);
+  pointer-events: none;
+}
+.d-search-res {
+  position: absolute;
+  left: 0;
+  right: 0;
+  /* 相对输入框下沿，不写死像素：改输入框高度时不会再脱节 */
+  top: calc(100% + 6px);
+  background: var(--card);
+  border: 1px solid var(--d-line);
+  border-radius: 10px;
+  box-shadow: var(--sh-md);
+  z-index: 50;
+  /* 矮视口下不被面板底裁掉 */
+  max-height: min(340px, calc(100dvh - 160px));
+  overflow-y: auto;
+  padding: 4px;
+}
+/* 搜索结果里的方法徽标比目录里窄一档（原型 40 / 9.5px） */
+.d-sres .d-mth {
+  width: 40px;
+  font-size: 10px;
+  padding: 2px 0;
+}
+.d-sres {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 8px;
+  border-radius: 7px;
+  cursor: pointer;
+  font-size: 12px;
+  width: 100%;
+  text-align: left;
+  border: 0;
+  background: none;
+}
+.d-sres:hover,
+.d-sres.on {
+  background: var(--primary-bg);
+}
+.d-sres .nm {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--t1);
+}
+.d-sres .grp {
+  font-size: 10.5px;
+  color: var(--t3);
+  flex: none;
+}
+.d-sempty {
+  padding: 14px;
+  text-align: center;
+  font-size: 11.5px;
+  color: var(--t3);
+}
+
+/* 列表承担滚动：页脚（下载全站 Markdown）才能常驻，不被菜单穿过去 */
+.d-side-list {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 0 10px 8px;
+}
+.d-side-foot {
+  flex: none; /* 不参与压缩：任何面板高度下都常驻底部 */
+  border-top: 1px solid var(--d-line);
+  /* 不透明：菜单从它下面滚过时不能透出文字 */
+  background: var(--card);
+  /* 左右都按盒子网格 10：按钮是盒子，不是文字，与搜索框同一条基线 */
+  padding: 10px 10px calc(10px + env(safe-area-inset-bottom, 0px));
+}
+.d-side-dl {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  height: 32px;
+  padding: 0 10px;
+  border-radius: 8px;
+  border: 1px solid var(--d-line);
+  background: var(--card-2);
+  font-size: 12px;
+  color: var(--t2);
+  text-decoration: none;
+  transition: border-color 0.15s, color 0.15s, background 0.15s;
+}
+.d-side-dl:hover {
+  color: var(--primary);
+  border-color: var(--primary);
+  background: var(--primary-bg);
+}
+
+/* ── 级联：板块 → 节点 → 接口 ── */
+.d-sec {
+  margin-bottom: 2px;
+}
+.d-sec-h {
+  display: flex;
+  align-items: center;
+  height: 34px;
+  padding: 0 8px;
+  border-radius: 8px;
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 600;
+  user-select: none;
+  color: var(--t1);
+  width: 100%;
+  border: 0;
+  background: none;
+  font-family: inherit;
+}
+.d-sec-h:hover {
+  background: var(--bg);
+}
+.d-sec.closed .d-sec-body {
+  display: none;
+}
+.d-chev {
+  width: 6px;
+  height: 6px;
+  /* 用 currentColor：chevron 出现在按钮、标题、卡片头三种前景色上，
+     写死一个灰值必然在某一处看不清（暗色下尤其）。 */
+  border-right: 1.6px solid currentColor;
+  border-bottom: 1.6px solid currentColor;
+  opacity: 0.55;
+  transform: rotate(45deg) translate(-1px, -1px);
+  transition: transform 0.15s;
+  flex: none;
+  margin-left: auto;
+}
+.d-sec.closed .d-chev,
+.d-mod.closed .d-chev,
+.d-rcard > summary .d-chev {
+  transform: rotate(-45deg);
+}
+
+.d-mod {
+  display: flex;
+  align-items: center;
+  height: 32px;
+  padding: 0 8px 0 18px;
+  border-radius: 7px;
+  cursor: pointer;
+  font-size: 12.5px;
+  color: var(--t2);
+  user-select: none;
+  gap: 6px;
+  width: 100%;
+  border: 0;
+  background: none;
+  font-family: inherit;
+}
+.d-mod:hover {
+  background: var(--bg);
+  color: var(--t1);
+}
+.d-eps {
+  padding: 1px 0 3px;
+}
+.d-eps.closed {
+  display: none; /* 与 .d-sec.closed .d-sec-body 同一套：折叠 = 加类，不用内联 display */
+}
+.d-ep {
+  display: flex;
+  align-items: center;
+  min-height: 30px;
+  padding: 4px 8px 4px 28px;
+  border-radius: 7px;
+  cursor: pointer;
+  font-size: 12.5px;
+  color: var(--t2);
+  gap: 8px;
+  width: 100%;
+  border: 0;
+  background: none;
+  font-family: inherit;
+  text-align: left;
+}
+.d-ep:hover {
+  background: var(--bg);
+  color: var(--t1);
+}
+.d-ep.on {
+  background: var(--primary-bg);
+  color: var(--primary);
+  font-weight: 600;
+}
+.d-ep .nm {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.d-ep-solo {
+  padding-left: 18px;
+  margin-top: 1px;
+}
+
+/* 方法徽标：唯一一份，侧栏/地址条/搜索结果/调试结果共用 */
+.d-mth {
+  font-family: var(--mono);
+  font-size: 10px;
+  font-weight: 700;
+  color: #fff;
+  padding: 3px 0;
+  border-radius: 5px;
+  letter-spacing: 0.2px;
+  width: 46px;
+  text-align: center;
+  flex: none;
+}
+.d-mth.POST {
+  background: var(--d-post);
+}
+.d-mth.GET {
+  background: var(--d-get);
+}
+.d-mth.DELETE {
+  background: var(--d-del);
+}
+.d-mth.PUT,
+.d-mth.PATCH {
+  background: #f59e0b;
+}
+.d-ep .d-mth {
+  margin-left: auto;
+}
+
+/* ── 页头 ── */
+.d-ep-actions .d-iconbtn {
+  height: 26px;
+  font-size: 12px;
+  padding: 0 8px;
+}
+.d-crumb {
+  font-size: 12px;
+  color: var(--t3);
+  margin-bottom: 10px;
+}
+.d-crumb b {
+  color: var(--t2);
+  font-weight: 400;
+}
+.d-ep-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.d-ep-h1 {
+  font-size: 23px;
+  font-weight: 650;
+  letter-spacing: -0.2px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin: 0;
+  line-height: 1.35;
+}
+.d-ep-actions {
+  margin-left: auto;
+  display: inline-flex;
+  gap: 6px;
+}
+.d-tag {
+  font-size: 11px;
+  font-weight: 500;
+  padding: 2px 8px;
+  border-radius: 5px;
+  background: var(--warning-bg);
+  color: var(--d-warn-tx);
+}
+.d-tag.sync {
+  background: var(--success-bg);
+  color: var(--d-ok-tx);
+}
+.d-tag.stream {
+  background: var(--info-bg);
+  color: var(--d-info-tx);
+}
+.d-ep-line {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 12px;
+  padding: 9px 12px;
+  background: var(--card);
+  border: 1px solid var(--d-line);
+  border-radius: var(--r-md);
+  box-shadow: var(--d-sh);
+}
+.d-ep-line .path {
+  font-family: var(--mono);
+  font-size: 13px;
+  color: var(--t1);
+  flex: 1;
+  min-width: 0;
+  overflow-x: auto;
+  white-space: nowrap;
+}
+.d-iconbtn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 28px;
+  padding: 0 9px;
+  border-radius: 7px;
+  font-size: 12px;
+  color: var(--t2);
+  border: 1px solid var(--d-line);
+  background: var(--card);
+  flex: none;
+  cursor: pointer;
+  font-family: inherit;
+}
+.d-iconbtn:hover {
+  border-color: var(--border-h);
+  color: var(--t1);
+}
+.d-btn-try {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 30px;
+  padding: 0 13px;
+  border-radius: 8px;
+  background: var(--primary);
+  color: #fff;
+  font-size: 12.5px;
+  font-weight: 600;
+  flex: none;
+  border: 0;
+  cursor: pointer;
+  font-family: inherit;
+}
+.d-btn-try:hover {
+  background: var(--primary-h);
+}
+.d-ep-desc {
+  margin-top: 14px;
+  color: var(--t2);
+  line-height: 1.8;
+  font-size: 13.5px;
+}
+.d-hint {
+  font-size: 11.5px;
+  color: var(--t3);
+  line-height: 1.7;
+  margin-top: 8px;
+}
+
+/* ── 小节标题 ── */
+.d-sec-t {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin: 30px 0 12px;
+}
+.d-sec-t h2 {
+  font-size: 15px;
+  font-weight: 650;
+  letter-spacing: -0.1px;
+  margin: 0;
+}
+.d-sec-t .n {
+  font-size: 12px;
+  color: var(--t3);
+}
+
+/* 字段来源图例：四个 chip（平台 / 标准 / 厂商 / 兼容）各是什么意思。
+   放在参数区顶部而不足行内 tooltip —— tooltip 在手机上根本出不来。 */
+.d-field-legend {
+  margin: -4px 0 14px;
+  font-size: 12px;
+  line-height: 1.7;
+  color: var(--t3);
+}
+.d-field-legend b {
+  font-weight: 600;
+  color: var(--t2);
+}
+
+/* ── 参数：分组卡 + 逐项行 ── */
+.d-pgroup {
+  background: var(--card);
+  border: 1px solid var(--d-line);
+  border-radius: var(--r-md);
+  box-shadow: var(--d-sh);
+  margin-bottom: 12px;
+  overflow: hidden;
+}
+.d-pgroup-h {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 14px;
+  background: var(--card-2);
+  border-bottom: 1px solid var(--d-line-2);
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--t1);
+}
+.d-pgroup-h .cnt {
+  margin-left: auto;
+  font-weight: 400;
+  color: var(--t3);
+  font-size: 11.5px;
+}
+.d-pgroup-h .lk {
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--t3);
+  font-weight: 400;
+}
+.d-prow {
+  padding: 11px 14px;
+  border-bottom: 1px solid var(--d-line-2);
+}
+.d-prow:last-child {
+  border-bottom: 0;
+}
+.d-prow-top {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.d-pname {
+  font-family: var(--mono);
+  font-size: 12.5px;
+  font-weight: 600;
+  /* 与标签同一手法：朝正文色混一档，深色主题下才不会出现「深紫贴深蓝」 */
+  color: color-mix(in srgb, var(--primary) 78%, var(--t1));
+  word-break: break-all;
+}
+.d-ptype {
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--t3);
+}
+.d-ptag {
+  margin-left: auto;
+  font-size: 10.5px;
+  padding: 1px 7px;
+  border-radius: 5px;
+  flex: none;
+}
+.d-ptag.req {
+  color: var(--d-warn-tx);
+  background: var(--warning-bg);
+}
+.d-ptag.cond {
+  color: var(--d-info-tx);
+  background: var(--info-bg);
+}
+.d-ptag.opt {
+  color: var(--t3);
+  background: var(--bg);
+}
+/* 字段说明现在是**一段多行文字**（后台一个文本框写什么，这里就显示什么）：
+   `pre-line` 保留换行，段与段之间就是行与行。 */
+.d-pdesc {
+  white-space: pre-line;
+  margin-top: 4px;
+  font-size: 13px;
+  color: var(--t2);
+  line-height: 1.75;
+}
+.d-pmeta {
+  margin-top: 7px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+  font-size: 11.5px;
+  color: var(--t3);
+}
+.d-chip {
+  font-family: var(--mono);
+  font-size: 11px;
+  padding: 1px 6px;
+  border-radius: 5px;
+  background: var(--bg);
+  color: var(--t2);
+  border: 1px solid var(--d-line);
+}
+.d-pex {
+  margin-top: 6px;
+  font-size: 11.5px;
+  color: var(--t3);
+}
+.d-pex code {
+  background: var(--bg);
+  padding: 2px 6px;
+  border-radius: 5px;
+  color: var(--t2);
+  font-size: 11.5px;
+}
+.d-pmodel {
+  margin-top: 8px;
+  padding: 8px 10px;
+  background: var(--card-2);
+  border: 1px solid var(--d-line-2);
+  border-radius: 8px;
+}
+.d-pmodel-t {
+  font-size: 11px;
+  color: var(--t3);
+  margin-bottom: 6px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.d-pmodel .d-chip {
+  background: var(--card);
+  font-size: 10.5px;
+  cursor: pointer;
+  border: 1px solid var(--d-line);
+  font-family: var(--mono);
+}
+.d-pmodel .d-chip:hover {
+  border-color: var(--primary);
+  color: var(--primary);
+}
+.d-authline {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 11px 14px;
+  font-size: 12.5px;
+  color: var(--t2);
+}
+.d-authline code {
+  background: var(--bg);
+  padding: 3px 8px;
+  border-radius: 6px;
+  font-size: 11.5px;
+}
+
+/* ── 响应：状态卡 + 字段树 ── */
+.d-rcard {
+  background: var(--card);
+  border: 1px solid var(--d-line);
+  border-radius: var(--r-md);
+  box-shadow: var(--d-sh);
+  margin-bottom: 12px;
+  overflow: hidden;
+}
+.d-rcard > summary {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 14px;
+  cursor: pointer;
+  font-size: 12.5px;
+  list-style: none;
+  user-select: none;
+}
+.d-rcard > summary::-webkit-details-marker {
+  display: none;
+}
+.d-rcard[open] > summary {
+  border-bottom: 1px solid var(--d-line-2);
+  background: var(--card-2);
+}
+.d-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--success);
+  flex: none;
+}
+.d-dot.e {
+  background: var(--danger);
+}
+.d-dot.a {
+  background: var(--warning);
+}
+.d-stcode {
+  font-family: var(--mono);
+  font-weight: 700;
+  font-size: 12.5px;
+}
+.d-lbl {
+  color: var(--t2);
+}
+.d-ctype {
+  font-family: var(--mono);
+  font-size: 10.5px;
+  color: var(--t3);
+  background: var(--bg);
+  padding: 1px 6px;
+  border-radius: 4px;
+}
+.d-rcard > summary .d-chev {
+  margin-left: auto;
+  transform: rotate(-45deg);
+}
+.d-rcard[open] > summary .d-chev {
+  transform: rotate(45deg);
+}
+.d-rnotes {
+  padding: 8px 14px 0;
+  font-size: 12px;
+  color: var(--t3);
+}
+.d-rtree {
+  padding: 4px 0 8px;
+}
+.d-rrow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 14px;
+  font-size: 12.5px;
+  min-height: 32px;
+}
+.d-rrow:hover {
+  background: var(--card-2);
+}
+.d-rname {
+  font-family: var(--mono);
+  font-weight: 600;
+  font-size: 12px;
+  color: var(--t1);
+  /* 卡片是 overflow:hidden：不换行 + 无 min-width 时，超长字段名会把右侧标签顶出卡片 */
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.d-rtype {
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--t3);
+  flex: none;
+}
+.d-rreq {
+  margin-left: auto;
+  font-size: 10.5px;
+  padding: 1px 6px;
+  border-radius: 5px;
+  /* 与 .d-ptag.req 同一套语义令牌：写死浅橙底在暗色主题下会变成一块亮斑 */
+  color: var(--d-warn-tx);
+  background: var(--warning-bg);
+  flex: none;
+}
+.d-rreq.opt {
+  color: var(--t3);
+  background: var(--bg);
+}
+.d-rrow .tri {
+  width: 14px;
+  height: 14px;
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--t3);
+  border-radius: 4px;
+  cursor: pointer;
+  background: none;
+  border: 0;
+  padding: 0;
+}
+.d-rrow .tri:hover {
+  background: var(--bg);
+}
+.d-rrow .tri::before {
+  content: "";
+  width: 5px;
+  height: 5px;
+  border-right: 1.4px solid currentColor;
+  border-bottom: 1.4px solid currentColor;
+  transform: rotate(45deg) translate(-1px, -1px);
+  transition: transform 0.12s;
+}
+.d-rrow.closed .tri::before {
+  transform: rotate(-45deg);
+}
+.d-rrow .sp {
+  width: 14px;
+  flex: none;
+}
+
+/* ── 表格 / 折叠 / 模型 chips ── */
+.d-tblwrap {
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+}
+.d-tbl {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12.5px;
+  /* 只在窄容器里起作用（宽正文里 width:100% 仍然优先） */
+  min-width: 520px;
+}
+.d-tbl th {
+  text-align: left;
+  font-weight: 600;
+  font-size: 11.5px;
+  color: var(--t3);
+  padding: 8px 12px;
+  background: var(--card-2);
+  border-bottom: 1px solid var(--d-line-2);
+}
+.d-tbl td {
+  padding: 9px 12px;
+  border-bottom: 1px solid var(--d-line-2);
+  color: var(--t2);
+  vertical-align: top;
+}
+.d-tbl tr:last-child td {
+  border-bottom: 0;
+}
+.d-tbl code {
+  font-family: var(--mono);
+  font-size: 11.5px;
+  color: var(--t1);
+}
+.d-fold {
+  background: var(--card);
+  border: 1px solid var(--d-line);
+  border-radius: var(--r-md);
+  box-shadow: var(--d-sh);
+  margin-bottom: 12px;
+}
+.d-fold > summary {
+  list-style: none;
+  padding: 11px 14px;
+  font-size: 12.5px;
+  font-weight: 600;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.d-fold > summary::-webkit-details-marker {
+  display: none;
+}
+.d-fold > summary .d-chev {
+  margin-left: auto;
+  transform: rotate(-45deg);
+}
+.d-fold[open] > summary .d-chev {
+  transform: rotate(45deg);
+}
+.d-fold[open] > summary {
+  border-bottom: 1px solid var(--d-line-2);
+}
+.d-fold-b {
+  padding: 12px 14px;
+  font-size: 12.5px;
+  color: var(--t2);
+  line-height: 1.8;
+}
+.d-fold-b ol,
+.d-fold-b ul {
+  margin: 0;
+  padding-left: 18px;
+  list-style-position: outside;
+}
+.d-fold-b ol {
+  list-style-type: decimal;
+}
+.d-fold-b ul {
+  list-style-type: disc;
+}
+.d-fold-b li + li {
+  margin-top: 6px;
+}
+.d-mchips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.d-mchip {
+  font-family: var(--mono);
+  font-size: 11.5px;
+  padding: 3px 8px;
+  border-radius: 6px;
+  background: var(--bg);
+  border: 1px solid var(--d-line);
+  color: var(--t2);
+}
+
+/* ── 右栏：示例 / 调试 ── */
+.d-rail-h {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 9px;
+}
+.d-rail-h b {
+  font-size: 12.5px;
+  font-weight: 650;
+}
+.d-rail-h .sp {
+  flex: 1;
+}
+.d-rail-h .sub {
+  font-size: 11px;
+  color: var(--t3);
+}
+.d-tabs {
+  display: flex;
+  gap: 2px;
+  background: var(--bg);
+  padding: 3px;
+  border-radius: 8px;
+  margin-bottom: 8px;
+  overflow-x: auto;
+}
+.d-tabs button {
+  font-size: 11.5px;
+  padding: 4px 9px;
+  border-radius: 6px;
+  color: var(--t2);
+  white-space: nowrap;
+  border: 0;
+  background: none;
+  cursor: pointer;
+  font-family: inherit;
+}
+.d-tabs button.on {
+  background: var(--card);
+  color: var(--t1);
+  font-weight: 600;
+  box-shadow: var(--d-sh);
+}
+.d-code {
+  margin: 0;
+  background: var(--d-code-bg);
+  color: var(--d-code-tx);
+  border-radius: var(--r-md);
+  padding: 13px 14px;
+  font-family: var(--mono);
+  font-size: 11.5px;
+  line-height: 1.8;
+  overflow: auto;
+  max-height: 400px;
+  white-space: pre-wrap;
+  word-break: break-word;
+  tab-size: 2;
+}
+.d-code .k {
+  color: var(--code-key);
+}
+.d-code .s {
+  color: var(--code-str);
+}
+.d-code .n {
+  color: var(--code-num);
+}
+.d-code .c {
+  color: var(--code-comment);
+}
+.d-rail-block {
+  margin-bottom: 22px;
+}
+.d-rail-empty {
+  padding: 16px;
+  border: 1px dashed var(--d-line);
+  border-radius: var(--r-md);
+  font-size: 11.5px;
+  color: var(--t3);
+  text-align: center;
+}
+
+/* 调试面板 */
+.d-rail > .d-try-url {
+  /* 只对右栏直接子级生效：它随右栏一起滚，但停在上沿，发送按钮始终可点 */
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  /* 必须不透明，否则参数行会从按钮下面透出来 */
+  background: var(--card);
+}
+.d-try-url {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 9px;
+  border: 1px solid var(--d-line);
+  border-radius: 9px;
+  background: var(--card-2);
+}
+.d-try-url code {
+  font-size: 11.5px;
+  color: var(--t1);
+  overflow-x: auto;
+  white-space: nowrap;
+  flex: 1;
+  min-width: 0; /* flex 子项默认 min-width:auto，长 URL 会把右栏撑出横向滚动 */
+}
+.d-tbtn {
+  height: 28px;
+  padding: 0 13px;
+  border-radius: 7px;
+  background: var(--primary);
+  color: #fff;
+  font-size: 12px;
+  font-weight: 600;
+  flex: none;
+  border: 0;
+  cursor: pointer;
+  font-family: inherit;
+}
+.d-tbtn:disabled {
+  background: var(--card-2);
+  color: var(--t3);
+  box-shadow: inset 0 0 0 1px var(--d-line);
+  cursor: not-allowed;
+}
+.d-tlabel {
+  font-size: 11.5px;
+  color: var(--t2);
+  font-weight: 600;
+  margin: 14px 0 6px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.d-tlabel .sp {
+  flex: 1;
+}
+.d-tlabel .sub {
+  font-weight: 400;
+  color: var(--t3);
+}
+.d-tinput {
+  width: 100%;
+  height: 34px;
+  border: 1px solid var(--d-line);
+  border-radius: 8px;
+  padding: 0 10px;
+  font-size: 12px;
+  font-family: var(--mono);
+  background: var(--card);
+  color: var(--t1);
+}
+.d-tinput:focus {
+  outline: 0;
+  border-color: var(--primary);
+  box-shadow: 0 0 0 3px var(--primary-bg);
+}
+.d-tcheck {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 0;
+  font-size: 12px;
+  color: var(--t2);
+}
+.d-tcheck input[type="checkbox"] {
+  width: 14px;
+  height: 14px;
+  accent-color: var(--primary);
+  flex: none;
+}
+.d-tcheck .nm {
+  font-family: var(--mono);
+  font-size: 11.5px;
+  color: var(--t1);
+  min-width: 96px;
+}
+.d-tcheck .val {
+  flex: 1;
+  min-width: 0;
+  height: 28px;
+  border: 1px solid var(--d-line);
+  border-radius: 6px;
+  padding: 0 8px;
+  font-size: 11.5px;
+  font-family: var(--mono);
+  background: var(--card);
+  color: var(--t1);
+}
+/* 复杂参数（messages / tools）：横向一行放不下，改成「勾选行 + 多行 JSON」。 */
+.d-tfield {
+  margin-bottom: 8px;
+}
+.d-tfield-h {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 3px 0;
+  cursor: pointer;
+}
+.d-tfield-h .nm {
+  font-family: var(--mono);
+  font-size: 11.5px;
+  color: var(--t1);
+}
+.d-tfield-h .sub {
+  margin-left: auto;
+  font-size: 10.5px;
+  color: var(--t3);
+}
+.d-tarea {
+  width: 100%;
+  box-sizing: border-box;
+  border: 1px solid var(--d-line);
+  border-radius: 6px;
+  padding: 8px;
+  font-size: 11px;
+  line-height: 1.6;
+  font-family: var(--mono);
+  background: var(--card);
+  color: var(--t1);
+  resize: vertical;
+}
+.d-tarea:focus {
+  outline: none;
+  border-color: var(--primary);
+}
+/* 请求体 JSON 模式：语法错误就地标红，不弹 toast（读者还在打字） */
+.d-tarea--bad {
+  border-color: var(--danger);
+}
+.d-terr {
+  margin: 6px 0 0;
+  font-size: 11px;
+  line-height: 1.6;
+  color: var(--danger);
+}
+/* 胶囊控件是管理台密度（min-height 32 / 13px 字）：右栏更窄更密，只在这一处收窄 */
+.d-tseg .kbtn {
+  min-height: 24px;
+  padding: 2px 9px;
+  font-size: 11px;
+}
+.d-tkeyrow .sp {
+  flex: 1;
+}
+.d-tres {
+  margin-top: 14px;
+  border: 1px solid var(--d-line);
+  border-radius: var(--r-md);
+  overflow: hidden;
+}
+.d-tres-h {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 9px 11px;
+  background: var(--card-2);
+  border-bottom: 1px solid var(--d-line-2);
+  font-size: 11.5px;
+}
+.d-tres-b {
+  min-height: 210px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  color: var(--t3);
+  font-size: 11.5px;
+  text-align: center;
+  padding: 20px;
+}
+.d-tres-b .ico {
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  background: var(--bg);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 15px;
+}
+.d-tres-body {
+  margin: 0;
+  /* 42vh 保证在 700px 高的视口里仍能看到结果头部与上方的发送条 */
+  max-height: min(300px, 42vh);
+  overflow: auto;
+  padding: 12px;
+  font-family: var(--mono);
+  font-size: 11.5px;
+  line-height: 1.75;
+  white-space: pre-wrap;
+  word-break: break-word;
+  color: var(--t2);
+  background: var(--card);
+}
+
+/* ── 说明页正文 ── */
+.d-guide p {
+  font-size: 13.5px;
+  color: var(--t2);
+  line-height: 1.9;
+  margin: 0 0 14px;
+}
+.d-guide h3 {
+  font-size: 14px;
+  font-weight: 650;
+  margin: 26px 0 10px;
+}
+.d-guide ol,
+.d-guide ul {
+  margin: 0 0 14px;
+  padding-left: 20px;
+  color: var(--t2);
+  font-size: 13.5px;
+  line-height: 1.9;
+  /* Tailwind preflight 把 ol/ul 的 list-style 清零了：不显式声明就只剩缩进，
+     步骤会变成一串没有编号的句子（读者不知道有几步）。 */
+  list-style-position: outside;
+}
+.d-guide ol {
+  list-style-type: decimal;
+}
+.d-guide ul {
+  list-style-type: disc;
+}
+.d-guide .note {
+  background: var(--card);
+  border: 1px solid var(--d-line);
+  border-left: 3px solid var(--primary);
+  border-radius: var(--r-sm);
+  padding: 12px 14px;
+  font-size: 12.5px;
+  color: var(--t2);
+  line-height: 1.8;
+  margin: 0 0 14px;
+}
+
+/* ── 补充态：字段备注 / 别名 / 计数 / 骨架 / 调试边界 ── */
+/* 字段的第二行说明（条件必填的解释、厂商备注）：比 desc 弱一档，不抢主描述。 */
+.d-pnote {
+  color: var(--t3);
+}
+
+/* 行内代码：说明文字里的 `字段名`。
+   与 .d-pex code 同一套配色，字号跟着正文走（说明文字比示例小一档）。 */
+.d-pdesc code {
+  font-family: var(--mono);
+  font-size: 0.94em;
+  background: var(--bg);
+  color: var(--t2);
+  padding: 1px 5px;
+  border-radius: 4px;
+  overflow-wrap: anywhere;
+}
+.d-pdesc strong {
+  color: var(--t1);
+  font-weight: 600;
+}
+
+/* 别名（同一接口的其他路径）：一行小字，不构成独立小节。 */
+.d-alias {
+  margin-top: 6px;
+  font-size: 11.5px;
+  color: var(--t3);
+}
+.d-fold-n {
+  font-size: 11.5px;
+  color: var(--t3);
+  font-weight: 400;
+  margin: 0 6px 0 8px;
+}
+/* 枚举值已废弃：删除线而不是隐藏 —— 读者需要知道「这个值曾经存在、现在别用」。 */
+.d-chip.dep {
+  text-decoration: line-through;
+  opacity: 0.6;
+}
+.d-mchip {
+  cursor: pointer;
+  transition: border-color 0.15s, color 0.15s;
+}
+.d-mchip:hover {
+  border-color: var(--primary);
+  color: var(--primary);
+}
+.d-mchip.ok {
+  border-color: var(--success);
+  color: var(--d-ok-tx);
+}
+/* 骨架：只在目录/正文未到时出现，尺寸与真实内容同高，避免加载完跳一下。 */
+.d-skel {
+  height: 13px;
+  border-radius: 6px;
+  background: var(--d-line-2);
+  margin-bottom: 12px;
+  animation: d-pulse 1.4s ease-in-out infinite;
+}
+.d-skel.w40 { width: 40%; }
+.d-skel.w60 { width: 60%; }
+.d-skel.w80 { width: 80%; }
+.d-side-skel {
+  background: var(--card);
+}
+@keyframes d-pulse {
+  0%, 100% { opacity: 0.55; }
+  50% { opacity: 1; }
+}
+/* 调试面板的「不可用」说明：与表单同宽的一条提示，不用弹窗。 */
+.d-tgate {
+  margin: 8px 0 4px;
+  padding: 9px 11px;
+  border-radius: var(--r-sm);
+  background: var(--warning-bg);
+  color: var(--d-warn-tx);
+  font-size: 11.5px;
+  line-height: 1.7;
+}
+.d-tkeyrow {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+.d-tkeyrow .d-tinput {
+  flex: 1;
+}
+/* 密钥来源下拉：与 .d-tinput 同高同圆角，否则同一行会高低错位。
+   flex:none —— 否则它会把满宽的输入框挤扁。 */
+.d-tsel {
+  flex: none;
+  min-width: 0;
+  max-width: 46%;
+  height: 34px;
+  padding: 0 8px;
+  border: 1px solid var(--d-line);
+  border-radius: 8px;
+  background: var(--card);
+  color: var(--t1);
+  font-family: inherit;
+  font-size: 12px;
+}
+
+/* 请求预览：默认折叠（右栏本来就在给表单让高度），展开后自身限高内滚，
+   这样长 URL 与长 body 都不会把右栏撑出横向滚动条。 */
+.d-tcurl {
+  margin-top: 14px;
+  border: 1px solid var(--d-line);
+  border-radius: var(--r-sm);
+  overflow: hidden;
+}
+.d-tcurl > summary {
+  padding: 8px 11px;
+  background: var(--card-2);
+  color: var(--t2);
+  font-size: 11.5px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.d-tcurl-h {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  padding: 6px 11px 0;
+}
+.d-tcurl-h .sub {
+  flex: 1;
+  min-width: 0;
+  color: var(--t3);
+  font-size: 10.5px;
+}
+.d-tcurl pre {
+  margin: 0;
+  padding: 10px 11px;
+  max-height: 180px;
+  overflow: auto;
+  background: var(--card);
+  color: var(--t2);
+  font-family: var(--mono);
+  font-size: 10.5px;
+  line-height: 1.7;
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+
+.d-tres-h .ms {
+  color: var(--t3);
+  font-size: 11.5px;
+}
+.d-tres-note {
+  padding: 6px 12px 0;
+  font-size: 11px;
+  color: var(--t3);
+}
+.d-tres-bin {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 14px;
+  font-size: 12px;
+  color: var(--t2);
+}
+.d-tres-bin a {
+  color: var(--primary);
+  font-weight: 500;
+  text-decoration: none;
+}
+/* 图片结果：限宽等比，不把 392px 的右栏撑开 */
+.d-tres-img {
+  display: block;
+  max-width: 100%;
+  max-height: 320px;
+  border-radius: var(--r-sm);
+  object-fit: contain;
+}
+
+/* ── 工作台嵌入（/admin/docs 的「预览」页签） ──
+   外层 `.adp-body--preview` 是**滚动容器**（padding:0，滚动条才贴面板边缘）；
+   内边距必须由这一层给：不加就是正文贴死在栏边（历史上就是这样，左边距为 0）。 */
+.d-embed {
+  min-height: 0;
+  padding: 22px 24px 60px;
+  max-width: 820px;
+  background: none;
+  font-size: 13px;
+}
+.d-embed .d-ep-h1 {
+  font-size: 19px;
+}
+.d-embed .d-rail {
+  width: auto;
+  height: auto;
+  position: static;
+  border-left: 0;
+  border-top: 1px solid var(--d-line);
+  padding: 14px 0 0;
+  margin-top: 22px;
+  background: none;
+}
+
+/* ── 空态 / 错误态 ── */
+.d-empty {
+  padding: 60px 0;
+  text-align: center;
+  color: var(--t3);
+  font-size: 13px;
+}
+.d-empty a {
+  color: var(--primary);
+  text-decoration: none;
+}
+
+/* ── 响应式 ──
+   两个值与 `lib/responsive.ts` 的 `DOCS_RAIL_NARROW_QUERY`(1280) /
+   `DOCS_DRAWER_QUERY`(1100) **必须逐字一致**。1100 不只是样式：JS 侧
+   `useIsDocsDrawer()` 用它决定「点调试后要不要把右栏滚进视野」——
+   取值错开就是「点了按钮但屏幕没反应」。1280 只收窄右栏，无行为分支。 */
+@media (max-width: 1280px) {
+  .d-rail {
+    width: 344px;
+  }
+}
+@media (max-width: 1100px) {
+  /* 移动端恢复「页面滚动」：三栏改成单列文档流，只留页面一条滚动条。
+     不恢复就会出现「页面不滚、正文自己滚、右栏又自己滚」的三条并列滚动区。 */
+  .d-app {
+    display: block;
+    height: auto;
+    min-height: 100dvh;
+    overflow: visible;
+  }
+  .d-topbar {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    height: 52px;
+    padding: 0 14px;
+    background: var(--card);
+    border-bottom: 1px solid var(--d-line);
+    position: sticky;
+    top: 0;
+    z-index: 40;
+  }
+  .d-topbar b {
+    font-size: 13px;
+  }
+  .d-burger {
+    margin-left: auto;
+    font-size: 18px;
+    line-height: 1;
+    border: 0;
+    background: none;
+    cursor: pointer;
+    color: var(--t1);
+  }
+  .d-side {
+    position: fixed;
+    left: 0;
+    top: 0;
+    bottom: 0;
+    /* 320 屏留出 ≥45px 遮罩热区；390 及以上仍是 280 */
+    width: min(280px, 86vw);
+    height: auto; /* top:0 / bottom:0 撑满，避免 iOS 动态工具栏下被裁 */
+    transform: translateX(-102%);
+    transition: transform 0.2s;
+    box-shadow: 0 10px 30px rgba(16, 24, 40, 0.18);
+    padding-top: 14px;
+    /* 必须高于 .pg-sb(45)：768–1100 区间自绘滚动条仍在，低于它会压在抽屉上 */
+    z-index: 60;
+  }
+  .d-side-x {
+    display: inline-flex;
+  }
+  .d-app.side-open .d-side {
+    transform: none;
+  }
+  .d-scrim {
+    position: fixed;
+    inset: 0;
+    background: rgba(17, 24, 39, 0.35);
+    z-index: 55; /* 高于 .pg-sb(45)、低于 .d-side(60) */
+    display: none;
+    border: 0;
+    padding: 0;
+  }
+  .d-app.side-open .d-scrim {
+    display: block;
+  }
+  .d-main {
+    height: auto;
+    overflow: visible;
+    padding: 18px 16px 40px;
+  }
+  .d-rail {
+    width: auto;
+    border-left: 0;
+    border-top: 1px solid var(--d-line);
+    height: auto;
+    position: static;
+    /* 必须复位：基类的 overflow-y:auto 在 height:auto 下仍会形成滚动容器 */
+    overflow: visible;
+    padding: 16px;
+    /* openTry 的 scrollIntoView 会停在视口顶部 —— 让出 52px 顶栏，否则标题被盖住 */
+    scroll-margin-top: 52px;
+  }
+  /* 移动端右栏不是滚动容器，sticky 会贴到顶栏下面并被遮住 */
+  .d-rail > .d-try-url {
+    position: static;
+  }
+  .d-ep-line {
+    flex-wrap: wrap;
+  }
+  .d-ep-h1 {
+    font-size: 20px;
+  }
+  .d-ep-actions {
+    width: 100%;
+    margin-left: 0;
+    justify-content: flex-end;
+  }
+}

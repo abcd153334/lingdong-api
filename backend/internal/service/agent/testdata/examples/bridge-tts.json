@@ -1,0 +1,118 @@
+{
+  "operations": [
+    {
+      "op": "create",
+      "entity": "vendor",
+      "key": "autodl",
+      "data": { "name": "AutoDL" }
+    },
+    {
+      "op": "create",
+      "entity": "adapter_spec",
+      "key": "autodl-indextts",
+      "data": {
+        "label": "AutoDL IndexTTS",
+        "vendor": "autodl",
+        "spec": {
+          "endpoints": {
+            "audio/speech": {
+              "method": "POST",
+              "path": "/api/v1/comfyui/comfyui_workflow/{upstream_model}",
+              "omit_model": true,
+              "response_content_type": "audio/wav",
+              "request_fields": [
+                {
+                  "name": "reference_audio",
+                  "type": "url",
+                  "required": true,
+                  "desc": "参考音色的音频地址（上游可直接下载的 http/https；响应 Content-Type 必须是 audio/wav 或 audio/mpeg，audio/wave 会被拒绝）"
+                },
+                {
+                  "name": "emo_control_method",
+                  "type": "string",
+                  "default": "与音色参考音频相同",
+                  "enum": ["与音色参考音频相同", "使用情感参考音频"],
+                  "desc": "情绪控制方式"
+                }
+              ],
+              "body": {
+                "copy": {
+                  "prompt_text": "$req.input",
+                  "prompt_simple": "$req.reference_audio",
+                  "emo_ref_audio": "$req.reference_audio",
+                  "emo_control_method": "$req.emo_control_method"
+                },
+                "const": { "emo_random": false }
+              },
+              "extract": { "task_id": "$.data.task_id" },
+              "errors": {
+                "success": "body_code",
+                "code_path": "$.code",
+                "ok_codes": ["Success"],
+                "message_path": "$.msg"
+              },
+              "async": {
+                "mode": "bridge",
+                "poll": "audio/speech@poll",
+                "interval_ms": 1000,
+                "timeout_secs": 600
+              }
+            },
+            "audio/speech@poll": {
+              "method": "GET",
+              "path": "/api/v1/comfyui/comfyui_workflow/result/{task_id}",
+              "extract": {
+                "status": "$.data.status",
+                "error": "$.msg",
+                "result_urls": {
+                  "path": "$.data.results[*].url",
+                  "where": { "type": "audio" }
+                }
+              },
+              "status_map": {
+                "queued": ["QUEUED"],
+                "running": ["RUNNING"],
+                "succeeded": ["SUCCESS", "completed"],
+                "failed": ["FAILED"],
+                "canceled": ["CANCELED"]
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "op": "create",
+      "entity": "channel",
+      "key": "autodl-tts",
+      "data": {
+        "name": "AutoDL-TTS",
+        "adapter_id": "spec:autodl-indextts",
+        "base_url": "https://api.autodl.example",
+        "keys": ["sk-autodl"],
+        "groups": ["default"]
+      }
+    },
+    {
+      "op": "create",
+      "entity": "model",
+      "key": "indextts2",
+      "data": {
+        "display_name": "IndexTTS 2 语音合成",
+        "vendor": "autodl",
+        "modality": "audio",
+        "billing_mode": "spec",
+        "endpoints": ["audio/speech"],
+        "spec_prices": { "kind": "per_second", "max_seconds": 60, "per_second_price": 1000, "min_price": 10000 }
+      }
+    },
+    {
+      "op": "replace",
+      "entity": "model_bindings",
+      "key": "indextts2",
+      "data": {
+        "bindings": [{ "channel_key": "autodl-tts", "upstream_model": "indextts2-v1" }]
+      }
+    }
+  ]
+}

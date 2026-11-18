@@ -1,0 +1,32 @@
+# 构建上下文瘦身：排除依赖目录、构建产物、凭据文件与原型/文档，避免 build context 传输 GB 级文件
+# （deploy/*.Dockerfile 的 context 为仓库根目录，见 deploy/docker-compose.yml）
+#
+# 端口收敛与仓库卫生的另一半在 .gitignore；这里只解决"不把不该进镜像的东西送进构建层"。
+# 尤其是 **/.env —— 它含 APP_ENCRYPTION_KEY（库内全部密文的主密钥），
+# 进了构建层就等于随镜像/缓存一起分发，而最终运行镜像里看不到它，极难察觉。
+
+**/node_modules
+**/dist
+**/.git
+**/*.log
+**/.env
+**/.env.*
+!**/.env.example
+
+# 交付/归档产物与二进制：不允许进构建层
+*.zip
+*.exe
+*.bak
+.audit
+test-results
+outputs
+new-api
+源代码*
+lab
+prototype
+docs
+web/e2e/artifacts
+artifacts
+backend/data
+.trae
+.trae-html-share-packages

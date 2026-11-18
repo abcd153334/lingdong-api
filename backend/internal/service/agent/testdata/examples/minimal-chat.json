@@ -1,0 +1,59 @@
+{
+  "operations": [
+    {
+      "op": "create",
+      "entity": "vendor",
+      "key": "relayco",
+      "data": { "name": "中转公司", "color": "#0af" }
+    },
+    {
+      "op": "create",
+      "entity": "adapter_spec",
+      "key": "relay-a",
+      "data": {
+        "label": "中转 A",
+        "vendor": "relayco",
+        "spec": {
+          "endpoints": {
+            "chat/completions": { "path": "/v1/chat/completions", "passthrough": true }
+          }
+        }
+      }
+    },
+    {
+      "op": "create",
+      "entity": "channel",
+      "key": "relay-a-cn",
+      "data": {
+        "name": "中转A-国内",
+        "adapter_id": "spec:relay-a",
+        "base_url": "https://api.a.example",
+        "keys": ["sk-1"],
+        "groups": ["default"]
+      }
+    },
+    {
+      "op": "create",
+      "entity": "model",
+      "key": "relay-chat",
+      "data": {
+        "display_name": "中转对话",
+        "vendor": "relayco",
+        "modality": "chat",
+        "billing_mode": "tokens",
+        "enabled": true,
+        "endpoints": ["chat/completions"],
+        "input_price": 500000,
+        "output_price": 1500000
+      }
+    },
+    {
+      "op": "replace",
+      "entity": "model_bindings",
+      "key": "relay-chat",
+      "data": {
+        "bindings": [{ "channel_key": "relay-a-cn", "upstream_model": "gpt-4o-mini" }]
+      }
+    }
+  ]
+}

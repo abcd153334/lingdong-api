@@ -1,0 +1,179 @@
+/* ============================================================
+   设计令牌 · 映射 prototype/assets/prototype.css :root / [data-theme="dark"]
+   亮/暗两套原值照搬，经 @theme inline 暴露为 Tailwind 工具类
+   （--color-* / --radius-* / --font-* / --shadow-*）
+   ============================================================ */
+:root {
+  /* color-scheme 是**继承**属性：写在 :root 上，整棵树里的原生部件（日期选择
+     器的日历弹层、textarea 的 resize 手柄、select 弹层、自动填充底色，以及
+     未被自绘覆盖的滚动条）一起跟随主题。只写在某个 input 上等于只有它一个人
+     变色 —— 那正是改造前「暗色模式下滚动条仍是浅色」的根因。
+     注：`[data-theme="dark"]` 与 `:root` 特异性相同，暗色覆盖**靠源码顺序**生效
+     （它在本文件靠后）。把暗色块挪到前面会让整套色板静默退回亮色。 */
+  color-scheme: light;
+  --primary: #6366f1;
+  --primary-h: #4f46e5;
+  --primary-bg: rgba(99, 102, 241, 0.1);
+  --grad: linear-gradient(135deg, #6366f1, #8b5cf6);
+  --success: #10b981;
+  --success-bg: rgba(16, 185, 129, 0.12);
+  --warning: #f59e0b;
+  --warning-bg: rgba(245, 158, 11, 0.12);
+  --danger: #ef4444;
+  --danger-bg: rgba(239, 68, 68, 0.12);
+  --info: #64748b;
+  --info-bg: rgba(100, 116, 139, 0.12);
+  --m1: #3b82f6;
+  --m2: #8b5cf6;
+  --m3: #f97316;
+  --m4: #ec4899;
+  --m5: #06b6d4;
+  --m6: #64748b;
+  --m7: #94a3b8;
+  /* 第 8 类模态（music）：与 --m3 音频橙、--m4 视频粉都拉开色相差，避免徽标混淆 */
+  --m8: #14b8a6;
+  --bg: #f6f7fb;
+  /* --bg-2 是「贴在 --bg 上的悬浮块」底色：侧栏分组 hover、内嵌代码块。
+     与 --card-2（贴在 --card 白底上的浅色块）用途不同 —— 混用会让 hover
+     在浅灰底上比周围更白，看起来像「被点亮」而不是「被指到」。 */
+  --bg-2: #eef0f7;
+  --card: #ffffff;
+  --card-2: #fafbfe;
+  /* 表格行悬停的**表面色**：必须不透明。
+     吸右操作列（.tbl .is-pin）是 position:sticky，靠自身背景遮住横向滚动的其它列；
+     用 --primary-bg（10% 透明）会让下层文字透出来，与按钮叠在一起（768px 实测）。
+     --primary-bg 是「叠在已知底上的浅色强调」（标签底/选中项），语义不是表面 —— 两者不能混用。
+     color-mix 让它自动跟随 --primary / --card 变化，暗色块无需再写一份（避免第二真相源）。 */
+  --row-hover: color-mix(in srgb, var(--primary) 10%, var(--card));
+  --border: #e9ecf4;
+  --border-h: #d9dee9;
+  --t1: #111827;
+  --t2: #4b5563;
+  --t3: #9ca3af;
+  --glass: rgba(255, 255, 255, 0.82);
+  --sh-xs: 0 1px 2px rgba(16, 24, 40, 0.05);
+  --sh-md: 0 8px 24px -6px rgba(16, 24, 40, 0.12);
+  --sh-glow: 0 4px 14px rgba(99, 102, 241, 0.35);
+  --r-sm: 10px;
+  --r-md: 12px;
+  --r-lg: 16px;
+  /* 控件与排版最小令牌集（S7）：控件高度/间距/字号，避免同排控件多档并行 */
+  --ctl-h: 42px; /* 主控件：输入 / 下拉 / 按钮 */
+  --ctl-h-sm: 36px; /* 次控件：.pbar 内联输入 / 下拉 / 按钮 */
+  --gap-sm: 8px;
+  --gap-md: 14px;
+  /* 块间距（页头/卡片/栅格区块之间）。与 --gap-md（栅格内 item 间距）分开：
+     两个值曾被混用，导致「标题到首块 14、块到块 18」的节奏断裂。 */
+  --gap-lg: 18px;
+  /* 顶栏高度：门户 .p-top 与管理台 .a-top 共用一份（两处都是 sticky top:0）。
+     页签栏吸附（.page-tabs > .tabs 的 top）读的就是它 —— 两处各写一个 64
+     正是「改了顶栏高度、页签钻到顶栏底下」的由来。 */
+  --topbar-h: 64px;
+  --fs-sm: 12.5px;
+  --fs-md: 13.5px;
+  /* 代码高亮的语义色（键 / 字符串 / 数字 / 注释）。
+     唯一来源：文档站 `.d-code` 与手册页 `.code-block` 共用。两处底色都是写死的
+     深色（#0d1117 / #1e1f26），所以这些值**不跟主题反色** —— 在暗色主题下
+     再翻一次会让文字消失在背景里。 */
+  --code-key: #93c5fd;
+  --code-str: #86efac;
+  --code-num: #fca5a5;
+  --code-comment: #7c8494;
+  --font: Inter, -apple-system, "Segoe UI", "PingFang SC", "Microsoft YaHei",
+    sans-serif;
+  --mono: "JetBrains Mono", "Cascadia Code", ui-monospace, Consolas, monospace;
+  /* --brand-tile 是「承载品牌 logo 的底板」颜色（实体图标、图标选择器）。
+     必须两套主题都接近白色：多数厂商 logo 是深色/透明底的图形，
+     放在暗色卡片上会融进背景（OpenAI 的黑色 logo 尤其明显）。
+     暗色下不用纯白是为了压一点眩光。 */
+  --brand-tile: #ffffff;
+  /* --ent-icon-bg 是「首字占位块」的底色：默认主色，调用方按实体品牌色内联覆盖。
+     必须在令牌里给出定义 —— 只写内联覆盖的话，任何一处忘了传色值都会变成
+     透明底白字（读不出来的空白块），而 CSS 变量漏定义不会报错。 */
+  --ent-icon-bg: var(--primary);
+  /* --z-pop 是锚定浮层（图标库 / 实体下拉）的层级：必须高于 .dialog·.drawer(60)
+     与 .mask(50)，低于全屏预览 .lb(80)。用令牌而不是就地写数字，是因为浮层
+     portal 到 body 后与弹窗不再有 DOM 层级关系，散落的数字迟早撞车。 */
+  --z-pop: 70;
+  /* 滚动条：尺寸 + 两档颜色。这里是**唯一**定义处，样式实现只在 app.css 的
+     「滚动条」区块 —— 任何组件里再写 ::-webkit-scrollbar / scrollbar-width
+     都算第二真相源（门禁 X11 拦）。
+     用半透明而非实色：轨道是 transparent，thumb 会同时压在卡片(#fff)、
+     页面底(#f6f7fb)、表格斑马行三种底色上，实色只在其中一种上刚好。 */
+  --sb-size: 10px;
+  --sb-thumb: rgba(100, 116, 139, 0.32);
+  --sb-track: transparent;
+}
+
+/* 移动端主控件 44px（触控基准；.btn-sm 例外 30/36 见 components.css） */
+@media (max-width: 767px) {
+  :root {
+    --ctl-h: 44px;
+    /* 移动端两条顶栏都压到 52px（见 components.css 的 .p-top/.a-top 媒体块） */
+    --topbar-h: 52px;
+  }
+}
+
+[data-theme="dark"] {
+  color-scheme: dark;
+  --bg: #0b0d12;
+  --bg-2: #1a1f2e;
+  --card: #141824;
+  --card-2: #181d2c;
+  --border: #232a3b;
+  --border-h: #323b52;
+  --t1: #f3f4f6;
+  --t2: #a1a9b8;
+  --t3: #6b7280;
+  --glass: rgba(13, 16, 26, 0.78);
+  --sh-xs: 0 1px 2px rgba(0, 0, 0, 0.4);
+  --sh-md: 0 8px 24px -6px rgba(0, 0, 0, 0.55);
+  /* 暗色下换亮色系（slate-400）：深底上压暗的 thumb 会整块消失。
+     透明度比亮色低一档 —— 亮色是「往深里压」、暗色是「往亮里提」，
+     同等透明度在暗背景上明显更扎眼。 */
+  --sb-thumb: rgba(148, 163, 184, 0.28);
+  /* 暗色下略降亮度：纯白底板在深色界面里是一块刺眼的亮斑。 */
+  --brand-tile: #f4f6fb;
+}
+
+@theme inline {
+  --color-primary: var(--primary);
+  --color-primary-h: var(--primary-h);
+  --color-primary-bg: var(--primary-bg);
+  --color-success: var(--success);
+  --color-success-bg: var(--success-bg);
+  --color-warning: var(--warning);
+  --color-warning-bg: var(--warning-bg);
+  --color-danger: var(--danger);
+  --color-danger-bg: var(--danger-bg);
+  --color-info: var(--info);
+  --color-info-bg: var(--info-bg);
+  --color-m1: var(--m1);
+  --color-m2: var(--m2);
+  --color-m3: var(--m3);
+  --color-m4: var(--m4);
+  --color-m5: var(--m5);
+  --color-m6: var(--m6);
+  --color-m7: var(--m7);
+  --color-m8: var(--m8);
+  --color-bg: var(--bg);
+  --color-card: var(--card);
+  --color-card-2: var(--card-2);
+  --color-border: var(--border);
+  --color-border-h: var(--border-h);
+  --color-t1: var(--t1);
+  --color-t2: var(--t2);
+  --color-t3: var(--t3);
+  --color-glass: var(--glass);
+
+  --radius-sm: var(--r-sm);
+  --radius-md: var(--r-md);
+  --radius-lg: var(--r-lg);
+
+  --font-sans: var(--font);
+  --font-mono: var(--mono);
+
+  --shadow-xs: var(--sh-xs);
+  --shadow-md: var(--sh-md);
+  --shadow-glow: var(--sh-glow);
+}

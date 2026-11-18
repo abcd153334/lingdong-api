@@ -1,0 +1,190 @@
+# 灵动 API · 单机部署编排
+# 用法：
+#   cp deploy/.env.example deploy/.env   # 按需修改（口令与密钥无默认值，缺了直接拒绝启动）
+#   docker compose -f deploy/docker-compose.yml up -d
+#
+# 配置入口只有一个：deploy/.env（下面用 env_file 整份注入）。
+# 以前这里逐个透传 environment，漏传的键（LD_TZ / LD_TRUSTED_PROXIES / LD_ALLOWED_ORIGINS /
+# LD_METRICS_* / LD_DIAG_HOLD_TOKEN）在 .env 里写了也不生效 —— 这类“配置明明写了”的故障
+# 只能靠翻容器 env 才能发现。现在 environment 只保留「缺了必须报错」和「需要推导默认值」的项。
+#
+# 端口一律绑 127.0.0.1：数据库、缓存、后端都只应通过反代或内网访问。
+# 绑 0.0.0.0 的后果不是"多暴露一个端口"，而是"Redis 匿名可写 + PG 弱口令可拖库"
+# —— 登录锁定、限流桶、worker leader 锁全在 Redis 里，可被直接清空。
+#
+# 镜像标签：TAG 不写时是 local（只用于本地开发，不参与回滚）。
+# 生产发布必须先跑 `bash deploy/scripts/tag-release.sh` 拿到明确 tag，再 `TAG=vX up -d`；
+# 理由：`latest`/`local` 无法回答"现在跑的是哪一版"。
+name: lingdong-api
+
+services:
+  postgres:
+    image: postgres:16
+    container_name: lingdong-postgres
+    restart: unless-stopped
+    # 停止预算：给 checkpointer 落完盘的时间。默认 10s 后被 SIGKILL，
+    # 表现是"每次重启都要做一次崩溃恢复"（数据不丢，但恢复慢、日志吓人）。
+    stop_grace_period: 60s
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-lingdong}
+      # 无默认值：缺了就拒绝启动，而不是静默使用公开的 lingdong/lingdong
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD 必须显式配置}
+      POSTGRES_DB: ${POSTGRES_DB:-lingdong}
+    ports:
+      - "127.0.0.1:5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-lingdong} -d ${POSTGRES_DB:-lingdong}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+    logging:
+      driver: json-file
+      options:
+        max-size: "50m"
+        max-file: "5"
+    networks:
+      - lingdong
+
+  redis:
+    image: redis:7
+    container_name: lingdong-redis
+    restart: unless-stopped
+    stop_grace_period: 30s
+    # AOF 持久化 + 口令。没有口令时任何能连 6379 的进程都能 SET/DEL 限流键与 leader 锁。
+    command: ["redis-server", "--appendonly", "yes", "--requirepass", "${REDIS_PASSWORD:?REDIS_PASSWORD 必须显式配置}"]
+    environment:
+      REDIS_PASSWORD: ${REDIS_PASSWORD:?REDIS_PASSWORD 必须显式配置}
+    ports:
+      - "127.0.0.1:6379:6379"
+    volumes:
+      - redisdata:/data
+    healthcheck:
+      test: ["CMD-SHELL", "redis-cli -a \"$$REDIS_PASSWORD\" --no-auth-warning ping | grep -q PONG"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 5s
+    logging:
+      driver: json-file
+      options:
+        max-size: "20m"
+        max-file: "3"
+    networks:
+      - lingdong
+
+  backend:
+    build:
+      context: ..
+      dockerfile: deploy/backend.Dockerfile
+      args:
+        # 版本号注入（-X 只认 var，见 backend.Dockerfile）
+        VERSION: "${TAG:-dev}"
+    image: "lingdong-api-backend:${TAG:-local}"
+    container_name: lingdong-backend
+    restart: unless-stopped
+    # 优雅退出的最坏路径：HTTP 30s + worker drain 30s + calllog 5s ≈ 65s（见 main.go 关闭段）。
+    # 默认 10s 会在第一段就把进程 SIGKILL，在途请求被硬切、结算只能靠回收兜底。
+    # 注意：`docker compose down -t 0` 会绕开这个值，升级脚本一律不用 -t。
+    stop_grace_period: 90s
+    # Postgres 必须就绪：启动即跑迁移/种子，连不上就是一次无效启动。
+    # Redis 只要求"已创建"：应用自己把 Redis 当作可降级依赖（连不上只 Warn，30s 探针会自动
+    # 恢复）。这里若要求 service_healthy，就把"可降级"变成了"Redis 坏了整站不启动" ——
+    # 编排比应用自身契约更严格，是配置错误，不是安全。
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_started
+    env_file:
+      - .env
+    environment:
+      # 环境变量名与 backend/internal/conf 约定一致。
+      # 这里只放两类：① 缺了必须让 compose 直接报错的；② 需要按本编排推导默认值的。
+      # 其余一切（模式、时区、代理、指标、留痕口径）都在 .env 里，不再逐项抄一遍。
+      APP_ENV: "${APP_ENV:-prod}"
+      DATABASE_URL: "${DATABASE_URL:-postgres://lingdong:${POSTGRES_PASSWORD:?}@postgres:5432/lingdong?sslmode=disable}"
+      # 单机编排里 Redis/PG 是 compose 服务名；接外部依赖时在 .env 里覆盖。
+      REDIS_ADDR: "${REDIS_ADDR:-redis:6379}"
+      REDIS_PASSWORD: "${REDIS_PASSWORD:?REDIS_PASSWORD 必须显式配置}"
+      # APP_ENCRYPTION_KEY 没有默认值，故意用 `:?` 让 compose 直接报错退出：
+      # 以前是 `:-0123...` 这种"公开示例值兜底"，忘了配就静默用公开密钥启动 ——
+      # 等于任何人读过源码就能解开库内密文（渠道密钥、托管密钥、/v1/media 签名）。
+      APP_ENCRYPTION_KEY: "${APP_ENCRYPTION_KEY:?APP_ENCRYPTION_KEY 必须显式配置，生成方式：openssl rand -hex 32}"
+      # 反代网段：本编排里是 web 容器所在网段（若 edge 也跑在本机同一网络，它也在里面）。
+      # 不配的后果不是"少一条日志"：所有用户会塌进同一个限流桶，登录失败锁定也会互相误伤。
+      # 用 172.29/24 而不是 172.28/24 —— 集群编排已占用 172.28。
+      LD_TRUSTED_PROXIES: "${LD_TRUSTED_PROXIES:-172.29.0.0/24}"
+      # 本地文件存储根目录（storage.active=none 时的落盘路径），挂载到命名卷以便重建后保留。
+      STORAGE_DIR: "${STORAGE_DIR:-/app/data}"
+      # 演示数据默认不写；想在本机看演示数据时在 .env 里改成 1。
+      LD_SEED_ENABLED: "${LD_SEED_ENABLED:-0}"
+    ports:
+      - "127.0.0.1:8080:8080"
+    volumes:
+      - storagedata:/app/data
+    healthcheck:
+      # deep=1 会真的探 DB 与 Redis：进程活着但依赖全挂时，容器不该继续报 healthy
+      test: ["CMD-SHELL", "wget -qO- 'http://127.0.0.1:8080/api/health?deep=1' >/dev/null 2>&1 || exit 1"]
+      interval: 10s
+      timeout: 6s
+      retries: 6
+      # 启动期要跑迁移与文档对账，20s 常常不够（不够会被反复 kill 形成启动循环）
+      start_period: 60s
+    logging:
+      driver: json-file
+      options:
+        max-size: "50m"
+        max-file: "5"
+    networks:
+      - lingdong
+
+  web:
+    build:
+      context: ..
+      dockerfile: deploy/web.Dockerfile
+    image: "lingdong-api-web:${TAG:-local}"
+    container_name: lingdong-web
+    restart: unless-stopped
+    stop_grace_period: 30s
+    depends_on:
+      # 用 service_started 而不是 service_healthy：backend 的 healthcheck 是 deep（含 Redis），
+      # 冷启动时 Redis 抖动会让 backend 永远不 healthy，于是 web 根本不启动 —— 门户整站打不开。
+      # 正确的分层是：容器存活看浅探针，对外就绪看 deep（LB/值班用），两者不要混。
+      backend:
+        condition: service_started
+    # 只绑回环：对外入口是边缘 nginx（443 终止 TLS）→ 本机；边缘配置不在本仓提供。
+    # 宿主 80 直接对外时，同一个站点会同时以明文可达 —— HSTS 也救不了第一次访问。
+    # 5173 是开发时用的第二个入口，已移到 docker-compose.override.example.yml。
+    ports:
+      - "127.0.0.1:80:80"
+    healthcheck:
+      # nginx 仅监听 IPv4（0.0.0.0:80），容器内 localhost 解析到 ::1 会连接被拒，故用 127.0.0.1
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1/ >/dev/null 2>&1 || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 10s
+    logging:
+      driver: json-file
+      options:
+        max-size: "20m"
+        max-file: "3"
+    networks:
+      - lingdong
+
+volumes:
+  pgdata:
+  redisdata:
+  storagedata:
+
+networks:
+  lingdong:
+    driver: bridge
+    # 固定网段：LD_TRUSTED_PROXIES 的默认值（172.29.0.0/24）依赖它。
+    # 换网段时两个值必须一起改（或显式设 LD_TRUSTED_PROXIES），否则客户端 IP 取错。
+    ipam:
+      config:
+        - subnet: "${LD_SUBNET:-172.29.0.0/24}"

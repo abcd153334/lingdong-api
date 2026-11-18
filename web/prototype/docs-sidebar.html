@@ -1,0 +1,737 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="light">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>文档站左栏原型 · 全类型 · 能力族 → 格式组 → 接口</title>
+<style>
+/* ── 设计令牌：与 web/src/styles/tokens.css 同值 ── */
+:root {
+  --primary: #6366f1; --primary-h: #4f46e5; --primary-bg: rgba(99,102,241,.1);
+  --success: #10b981; --warning: #f59e0b; --danger: #ef4444;
+  --bg: #f6f7fb; --bg-2: #eef0f7; --card: #fff; --card-2: #fafbfe;
+  --border: #e9ecf4; --border-h: #d9dee9;
+  --t1: #111827; --t2: #4b5563; --t3: #9ca3af;
+  --r-sm: 10px; --r-md: 12px; --r-lg: 16px;
+  --fs-sm: 12.5px; --fs-md: 13.5px;
+  --font: Inter, -apple-system, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+  --mono: "JetBrains Mono", "Cascadia Code", ui-monospace, Consolas, monospace;
+  --sh-md: 0 8px 24px -6px rgba(16,24,40,.12);
+}
+[data-theme="dark"] {
+  --bg: #0b0d12; --bg-2: #1a1f2e; --card: #141824; --card-2: #181d2c;
+  --border: #232a3b; --border-h: #323b52;
+  --t1: #f3f4f6; --t2: #a1a9b8; --t3: #6b7280;
+  --primary-bg: rgba(99,102,241,.18);
+  --sh-md: 0 8px 24px -6px rgba(0,0,0,.55);
+}
+* { box-sizing: border-box; }
+/* hidden 必须压过组件的 display:flex（UA 的 [hidden] 优先级低于类选择器） */
+[hidden] { display: none !important; }
+body {
+  margin: 0; background: var(--bg); color: var(--t1);
+  font-family: var(--font); font-size: var(--fs-md);
+  -webkit-font-smoothing: antialiased;
+}
+
+/* ── 页头 ── */
+.pt-head {
+  position: sticky; top: 0; z-index: 20;
+  display: flex; align-items: center; gap: 12px;
+  height: 60px; padding: 0 22px;
+  background: var(--card); border-bottom: 1px solid var(--border);
+}
+.pt-brand { font-weight: 700; font-size: 15px; letter-spacing: .01em; }
+.pt-brand span { color: var(--t3); font-weight: 500; margin-left: 8px; font-size: var(--fs-sm); }
+.pt-tools { margin-left: auto; display: flex; align-items: center; gap: 10px; font-size: var(--fs-sm); color: var(--t2); }
+.pt-tools label { display: inline-flex; align-items: center; gap: 6px; cursor: pointer; user-select: none; }
+.pt-btn {
+  border: 1px solid var(--border); background: var(--card); color: var(--t2);
+  font-size: var(--fs-sm); border-radius: var(--r-sm); padding: 5px 12px; cursor: pointer;
+  font-family: inherit;
+}
+.pt-btn:hover { background: var(--bg-2); color: var(--t1); }
+
+/* ── 两栏 ── */
+.pt-wrap {
+  display: grid; grid-template-columns: 300px minmax(0, 1fr);
+  gap: 26px; padding: 20px 22px 60px; max-width: 1380px; margin: 0 auto;
+  align-items: start;
+}
+
+/* ── 侧栏（components.css 的 .dc-side-* 同值） ── */
+.dc-side {
+  position: sticky; top: 80px; max-height: calc(100vh - 100px);
+  overflow: auto; display: flex; flex-direction: column; gap: 10px;
+  padding: 14px 10px 18px 12px; background: var(--card);
+  border: 1px solid var(--border); border-radius: var(--r-lg);
+}
+.dc-search {
+  width: 100%; height: 34px; border: 1px solid var(--border); border-radius: var(--r-sm);
+  background: var(--card-2); color: var(--t2); font-size: var(--fs-sm);
+  padding: 0 10px; font-family: inherit; outline: none; flex: none;
+}
+/* L0 容器 */
+.dc-side-wrap { display: flex; flex-direction: column; gap: 2px; }
+.dc-side-wrap-t {
+  display: flex; align-items: center; gap: 8px; width: 100%;
+  padding: 8px 8px; border: none; background: transparent; cursor: pointer;
+  font-family: inherit; font-size: var(--fs-md); font-weight: 700; color: var(--t1);
+  border-radius: var(--r-sm); text-align: left;
+}
+.dc-side-wrap-t:hover { background: var(--bg-2); }
+.dc-side-wrap-t .cnt { font-size: 11px; color: var(--t3); font-weight: 500; }
+.dc-side-wrap-b { display: flex; flex-direction: column; gap: 2px; padding-left: 4px; }
+/* L1 板块 */
+.dc-side-sec {
+  display: flex; align-items: center; gap: 7px; width: 100%;
+  font-size: var(--fs-md); color: var(--t1); font-weight: 600;
+  padding: 7px 8px; border: none; background: transparent; cursor: pointer;
+  border-radius: var(--r-sm); text-align: left; font-family: inherit;
+}
+.dc-side-sec:hover { background: var(--bg-2); }
+.dc-side-sec-t { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dc-side-sec-t em { font-style: normal; color: var(--t3); font-weight: 500; margin-left: 5px; font-size: var(--fs-sm); }
+.dc-dot { width: 6px; height: 6px; border-radius: 50%; display: inline-block; flex: none; }
+.dc-side-caret {
+  width: 0; height: 0; flex: none;
+  border-left: 4px solid transparent; border-right: 4px solid transparent;
+  border-top: 5px solid var(--t3); transform: rotate(-90deg); transition: transform .15s ease;
+}
+.dc-side-caret.on { transform: rotate(0deg); }
+.dc-side-body {
+  display: flex; flex-direction: column; gap: 1px;
+  padding: 2px 0 6px 34px; margin-left: 10px; border-left: 1px solid var(--border);
+}
+/* L2 格式组 */
+.dc-side-fmt {
+  display: flex; align-items: center; gap: 6px; width: 100%; flex-wrap: wrap;
+  border: none; background: transparent; cursor: pointer; font-family: inherit;
+  padding: 6px 9px; border-radius: var(--r-sm);
+  font-size: var(--fs-md); color: var(--t2); text-align: left;
+}
+/* 叶子格式组：与可折叠组同一套排版，只是没有展开态（箭头占位保持对齐） */
+.dc-side-fmt.leaf { color: var(--t1); font-weight: 500; }
+.dc-side-fmt.leaf .dc-side-caret { visibility: hidden; }
+.dc-side-fmt:hover { background: var(--bg-2); color: var(--t1); }
+.dc-side-fmt-t { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dc-side-fmt.on { background: var(--primary-bg); color: var(--primary-h); }
+.dc-side-fmt-body {
+  display: flex; flex-direction: column; gap: 1px;
+  padding: 1px 0 4px 20px; margin-left: 10px; border-left: 1px dashed var(--border-h);
+}
+/* L3 接口 */
+.dc-side-item {
+  flex: 1; display: flex; align-items: center; justify-content: space-between; gap: 8px;
+  flex-wrap: wrap;
+  padding: 6px 9px; border-radius: var(--r-sm); color: var(--t2);
+  font-size: var(--fs-md); text-decoration: none; cursor: pointer;
+  border: none; background: transparent; text-align: left; font-family: inherit;
+}
+.dc-side-item:hover { background: var(--bg-2); color: var(--t1); }
+.dc-side-item.on { background: var(--primary-bg); color: var(--primary-h); font-weight: 600; }
+.dc-side-lbl { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.api-mth {
+  font-family: var(--mono); font-size: 10px; font-weight: 700;
+  padding: 2px 5px; border-radius: 4px; min-width: 42px;
+  text-align: center; color: #fff; flex: none;
+}
+.api-mth.POST { background: #6366f1; }
+.api-mth.GET { background: #10b981; }
+.api-mth.DELETE { background: #ef4444; }
+.dc-side-sep { height: 1px; background: var(--border); margin: 5px 6px; }
+
+/* 标注（仅原型） */
+.lv, .lv-path, .lv-note { display: none; }
+body.anno .lv {
+  display: inline-block; font-size: 10px; line-height: 1;
+  padding: 2px 5px; border-radius: 4px; font-weight: 700; flex: none;
+  background: var(--primary-bg); color: var(--primary-h); font-family: var(--mono);
+}
+body.anno .lv-path {
+  display: block; flex: 0 0 100%; order: 3;
+  min-width: 0; max-width: 100%;
+  font-family: var(--mono); font-size: 9.5px; line-height: 1.45;
+  color: var(--t3); margin-top: 1px;
+  white-space: normal; overflow-wrap: anywhere; word-break: break-all;
+}
+body.anno .lv-note { display: block; font-size: 11px; color: var(--primary-h); padding: 1px 10px 6px; line-height: 1.5; }
+body.anno .dc-side-wrap-t { outline: 1px dashed rgba(99,102,241,.5); outline-offset: 1px; }
+body.anno .dc-side-sec { outline: 1px dashed rgba(99,102,241,.3); outline-offset: 1px; }
+body.anno .dc-side-fmt { outline: 1px dashed rgba(245,158,11,.55); outline-offset: 1px; }
+body.anno .dc-side-item { outline: 1px dashed rgba(16,185,129,.4); outline-offset: 1px; }
+
+/* ── 右侧说明区 ── */
+.pt-main { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
+.pt-card {
+  background: var(--card); border: 1px solid var(--border);
+  border-radius: var(--r-lg); padding: 18px 20px; box-shadow: var(--sh-md);
+}
+.pt-card h1 { margin: 0 0 2px; font-size: 17px; }
+.pt-card h2 { margin: 0 0 4px; font-size: 15px; font-weight: 700; }
+.pt-card h3 { margin: 16px 0 6px; font-size: var(--fs-md); font-weight: 700; color: var(--t1); }
+.pt-card p { margin: 6px 0; color: var(--t2); line-height: 1.7; font-size: var(--fs-md); }
+.pt-card .sub { color: var(--t3); font-size: var(--fs-sm); margin: 0 0 12px; }
+.pt-card code {
+  font-family: var(--mono); font-size: 12px; background: var(--bg-2);
+  padding: 1px 5px; border-radius: 4px; color: var(--t1);
+}
+table.pt-tbl { width: 100%; border-collapse: collapse; font-size: var(--fs-sm); margin-top: 8px; }
+table.pt-tbl th, table.pt-tbl td {
+  border-bottom: 1px solid var(--border); padding: 7px 9px;
+  text-align: left; vertical-align: top; color: var(--t2);
+}
+table.pt-tbl th { color: var(--t3); font-weight: 600; background: var(--card-2); white-space: nowrap; }
+table.pt-tbl td.mono, table.pt-tbl th.mono { font-family: var(--mono); font-size: 11.5px; }
+table.pt-tbl tr.tot td { background: var(--card-2); font-weight: 600; color: var(--t1); }
+.pt-tag {
+  display: inline-block; font-size: 11px; padding: 2px 7px; border-radius: 999px;
+  background: var(--primary-bg); color: var(--primary-h); font-weight: 600; white-space: nowrap;
+}
+.pt-tag.warn { background: rgba(245,158,11,.14); color: #b45309; }
+.pt-tag.bad { background: rgba(239,68,68,.12); color: #b91c1c; }
+.pt-tag.ok { background: rgba(16,185,129,.14); color: #047857; }
+.pt-list { margin: 8px 0 0; padding-left: 20px; color: var(--t2); line-height: 1.8; font-size: var(--fs-md); }
+.pt-list li { margin: 3px 0; }
+.pt-q {
+  border-left: 3px solid var(--warning); background: rgba(245,158,11,.06);
+  padding: 10px 14px; border-radius: 0 var(--r-sm) var(--r-sm) 0; margin: 10px 0;
+}
+.pt-q b { color: var(--t1); }
+.pt-ba { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin-top: 10px; }
+.pt-ba > div { border: 1px solid var(--border); border-radius: var(--r-md); padding: 10px 12px; background: var(--card-2); }
+.pt-ba h4 { margin: 0 0 6px; font-size: 12px; color: var(--t3); font-weight: 700; letter-spacing: .04em; }
+.pt-ba ul { margin: 0; padding-left: 18px; font-size: var(--fs-sm); color: var(--t2); line-height: 1.75; }
+
+@media (max-width: 1080px) {
+  .pt-wrap { grid-template-columns: minmax(0,1fr); padding: 14px; }
+  .dc-side { position: static; max-height: none; }
+  .pt-ba { grid-template-columns: 1fr; }
+}
+</style>
+</head>
+<body>
+
+<header class="pt-head">
+  <div class="pt-brand">灵动 API<span>API 文档 · 左栏原型 v2（全类型）</span></div>
+  <div class="pt-tools">
+    <label><input type="checkbox" id="anno"> 显示层级标注</label>
+    <button class="pt-btn" id="theme">暗色</button>
+  </div>
+</header>
+
+<div class="pt-wrap">
+
+  <nav class="dc-side" id="side">
+    <input class="dc-search" placeholder="搜索文档（可搜接口名、格式、模型）" aria-label="搜索文档">
+    <div id="tree"></div>
+  </nav>
+
+  <main class="pt-main">
+
+    <section class="pt-card">
+      <h1>全类型统一为「能力族 → 格式组 → 接口」</h1>
+      <p class="sub">这一版的层级、命名、排序全部从参考图反推，并且每一层都必须有后端字段能真实支撑；没有支撑的层不画。</p>
+
+      <h3>从参考图推导出的 6 条规则</h3>
+      <table class="pt-tbl">
+        <tr><th style="width:132px">规则</th><th>推导依据（参考图）</th><th>我方对应</th></tr>
+        <tr>
+          <td><b>R1 板块＝能力族</b></td>
+          <td>音频 / 聊天 / 补全 / 嵌入 / 图像 各自独立，一个板块只回答「我能调什么能力」</td>
+          <td>把「语言模型」拆成 <code>聊天（Chat）</code> + <code>补全（Completions）</code>；「向量与检索」拆成 <code>嵌入（Embeddings）</code> + <code>重排（Rerank）</code></td>
+        </tr>
+        <tr>
+          <td><b>R2 板块名＝中文（English）</b></td>
+          <td>「音频（Audio）」「聊天（Chat）」「嵌入（Embeddings）」</td>
+          <td>板块名不再取模型广场的「××模型」，改用能力族名 + 英文；模型广场名称不受影响</td>
+        </tr>
+        <tr>
+          <td><b>R3 板块按英文名字母序</b></td>
+          <td>Audio → Chat → Completions → Embeddings → Images，不是按业务重要性</td>
+          <td>Audio / Chat / Completions / Embeddings / Images / Moderations / Music / Rerank / Videos</td>
+        </tr>
+        <tr>
+          <td><b>R4 第二层＝格式</b></td>
+          <td>「原生OpenAI格式」「原生Gemini格式」「原生Claude格式」——格式是<b>组名</b>，不是接口名</td>
+          <td>接口名里现有的「（Anthropic 格式）」「（传文件）」全部拆掉，格式上移到组名</td>
+        </tr>
+        <tr>
+          <td><b>R5 单接口折叠为叶子</b></td>
+          <td>「补全 → 原生OpenAI格式 POST」：组里只有一接口时，组本身画成一行（组名 + 方法徽标）</td>
+          <td>补全 / 嵌入 / 审核 / 重排 / 即梦格式 都是单接口 → 叶子行，不再多占一层</td>
+        </tr>
+        <tr>
+          <td><b>R6 组按归属方英文序</b></td>
+          <td>聊天下 Claude → Gemini → OpenAI；音频下 Gemini → OpenAI</td>
+          <td>图像：即梦（Jimeng）→ OpenAI；同一板块内「原生」不特殊优先</td>
+        </tr>
+      </table>
+
+      <div class="pt-q">
+        <b>与参考图唯一不照抄的一点：没有「原生Gemini格式」。</b>
+        参考图那家支持 Gemini 原生协议（<code>/v1beta/models/{m}:generateContent</code>）；
+        我方入站线格式只有两种：<code>openai</code> 与 <code>claude</code>（<code>internal/pkg/wireformat/format.go:20-23</code>）。
+        凭空加一组就是伪造能力，所以这一版不出现。等真的实现了 Gemini 入站协议再加组，一条数据的事。
+      </div>
+    </section>
+
+    <section class="pt-card">
+      <h2>全量结构（左栏渲染的就是这张表）</h2>
+      <p class="sub">方法 + 路径都取自 <code>apidoc.endpointTable</code>，没有一条是原型编的。</p>
+      <table class="pt-tbl">
+        <thead>
+          <tr><th>板块</th><th>格式组</th><th>接口</th><th class="mono">方法 路径</th></tr>
+        </thead>
+        <tbody>
+          <tr><td rowspan="3">模型清单</td><td rowspan="3">—（通用接口子组）</td><td>可用模型列表</td><td class="mono">GET /v1/models</td></tr>
+          <tr><td>单模型查询</td><td class="mono">GET /v1/models/{model}</td></tr>
+          <tr><td>各类默认模型</td><td class="mono">GET /v1/models/defaults</td></tr>
+
+          <tr><td rowspan="3">音频（Audio）</td><td rowspan="3">原生OpenAI格式</td><td>文本转语音</td><td class="mono">POST /v1/audio/speech</td></tr>
+          <tr><td>音频转录</td><td class="mono">POST /v1/audio/transcriptions</td></tr>
+          <tr><td>音频翻译</td><td class="mono">POST /v1/audio/translations</td></tr>
+
+          <tr><td rowspan="3">聊天（Chat）</td><td>原生Claude格式 <span class="pt-tag">叶子</span></td><td>对话补全（= 现「对话补全（Anthropic 格式）」）</td><td class="mono">POST /v1/messages</td></tr>
+          <tr><td rowspan="2">原生OpenAI格式</td><td>对话补全</td><td class="mono">POST /v1/chat/completions</td></tr>
+          <tr><td>新版智能体接口</td><td class="mono">POST /v1/responses</td></tr>
+
+          <tr><td>补全（Completions）</td><td>原生OpenAI格式 <span class="pt-tag">叶子</span></td><td>文本补全</td><td class="mono">POST /v1/completions</td></tr>
+
+          <tr><td>嵌入（Embeddings）</td><td>原生OpenAI格式 <span class="pt-tag">叶子</span></td><td>文本向量化</td><td class="mono">POST /v1/embeddings</td></tr>
+
+          <tr><td rowspan="5">图像（Images）</td><td>—（直挂平台自有）</td><td>异步生成图像</td><td class="mono">POST /v1/images/generations/async</td></tr>
+          <tr><td>即梦格式 <span class="pt-tag">叶子</span></td><td>生成图像（Seedream 扩展字段）</td><td class="mono">POST /v1/images/generations</td></tr>
+          <tr><td rowspan="3">原生OpenAI格式</td><td>生成图像</td><td class="mono">POST /v1/images/generations</td></tr>
+          <tr><td>编辑图像</td><td class="mono">POST /v1/images/edits</td></tr>
+          <tr><td>图像变体</td><td class="mono">POST /v1/images/variations</td></tr>
+
+          <tr><td>审核（Moderations）</td><td>原生OpenAI格式 <span class="pt-tag">叶子</span></td><td>内容审核</td><td class="mono">POST /v1/moderations</td></tr>
+
+          <tr><td rowspan="2">音乐（Music）</td><td rowspan="2">SUNO格式</td><td>音乐生成</td><td class="mono">POST /v1/audio/music/generations</td></tr>
+          <tr><td>歌词生成</td><td class="mono">POST /v1/audio/lyrics</td></tr>
+
+          <tr><td>重排（Rerank）</td><td>通用格式 <span class="pt-tag">叶子</span></td><td>相关性重排</td><td class="mono">POST /v1/rerank</td></tr>
+
+          <tr><td rowspan="6">视频（Videos）</td><td rowspan="6">—（直挂平台统一入口）</td><td>创建视频任务</td><td class="mono">POST /v1/video/generations</td></tr>
+          <tr><td>视频再生成（升档）</td><td class="mono">POST /v1/video/regenerations</td></tr>
+          <tr><td>视频任务列表</td><td class="mono">GET /v1/video/generations</td></tr>
+          <tr><td>查询视频任务</td><td class="mono">GET /v1/video/generations/{id}</td></tr>
+          <tr><td>下载视频文件</td><td class="mono">GET /v1/video/generations/{id}/content</td></tr>
+          <tr><td>取消视频任务</td><td class="mono">DELETE /v1/video/generations/{id}</td></tr>
+          <tr><td>即梦格式 <span class="pt-tag">叶子</span></td><td>创建视频任务（原生 content[] 报文）</td><td class="mono">POST /v1/video/generations</td></tr>
+
+          <tr class="tot"><td colspan="3">合计</td><td class="mono">9 个能力板块 / 11 个格式组 / 44 条接口（42 篇标准文档 + 2 篇同路径方言篇）</td></tr>
+        </tbody>
+      </table>
+      <p class="sub" style="margin-top:10px">另有「开始使用」5 篇说明页与「通用接口」4 个子组（模型清单 3、文件与产物 7、异步任务 5、账户与用量 5），不参与模型能力分组。</p>
+    </section>
+
+    <section class="pt-card">
+      <h2>当前存在的问题</h2>
+      <p class="sub">只列有代码依据的；每条都能指到行。</p>
+
+      <h3>P0 · 直接让文档说假话</h3>
+      <table class="pt-tbl">
+        <tr><th style="width:56px">编号</th><th>问题</th><th style="width:38%">依据与后果</th></tr>
+        <tr>
+          <td>P0-1</td>
+          <td>板块口径取的是「模型广场」分组，不是能力族</td>
+          <td><code>section.go:97</code> 直接用 <code>GroupOf(id).Name</code>。于是「语言模型」里同时装着 chat 与 completions 两套协议，「向量与检索」里混着 embeddings 与 rerank，「音频模型」里同步 TTS 与异步音乐（音乐又另开板块）。用户找不到「嵌入」。</td>
+        </tr>
+        <tr>
+          <td>P0-2</td>
+          <td>没有「格式」这一层</td>
+          <td><code>CatalogEndpointGroup</code> 只有 <code>Endpoints</code>（<code>catalog.go:156-160</code>），类型板块下 <code>Name</code> 被强制置空（<code>endpoint_docs.go:356-358</code>）。后端无法表达「这个能力有三套格式」，前端也只能平铺。</td>
+        </tr>
+        <tr>
+          <td>P0-3</td>
+          <td>格式被写进了接口名</td>
+          <td>「对话补全（Anthropic 格式）」（<code>endpoints.go:214</code>）、「图片编辑（传文件）」（<code>:456</code>）。参考图正好相反：格式是组名，接口叫本名。</td>
+        </tr>
+        <tr>
+          <td>P0-4</td>
+          <td>厂商私有字段平铺进通用接口</td>
+          <td>视频提交 20 个 vendor 字段（<code>endpoints.go:592-634</code>）、图片生成 16 个（<code>:386-418</code>）、音乐 2 个（<code>:907-909</code>）。没有格式组，这些字段只能挂在一张表里，对不支持的模型就是假话。</td>
+        </tr>
+        <tr>
+          <td>P0-5</td>
+          <td>三个字段是伪能力（全仓无实现）</td>
+          <td><code>camera_control</code>（<code>endpoints.go:625</code>，标注「可灵」）、<code>volume</code> / <code>pitch</code>（<code>:827-828</code>）在 <code>adapters/</code> 与 <code>service/task/</code> 里均无任何读取。可灵适配器连 <code>metadata</code> 都明确 400（<code>duomiapi_kling.go:49-55</code>），说明它也不认运镜字段。</td>
+        </tr>
+      </table>
+
+      <h3>P1 · 结构缺陷（不改就会返工）</h3>
+      <ul class="pt-list">
+        <li><b>只有两层，一级 10 项、其中 8 项同类</b>：<code>sectionOrder</code>（<code>section.go:34-37</code>）把 8 个模型板块与「开始使用 / 通用接口」并列，参考图用一个「AI 模型接口」容器把它们收起来。</li>
+        <li><b>前端没有折叠与叶子两种形态</b>：<code>DocsSidebar.tsx:234</code> 的 <code>grp.name</code> 只是静态小标题 <code>.dc-side-sub-h</code>，既不能折叠，也没有「组名 + 方法徽标」的叶子画法。</li>
+        <li><b>没有「单接口折叠为叶子」的规则</b>：补全 / 嵌入 / 审核 / 重排 / 即梦格式都只有一个接口，不折叠就会多出 5 个只含一行的可折叠节点。</li>
+        <li><b>接口命名不成词表</b>：图片生成 / 图片编辑（传文件）/ 图片变体 vs 生成图像 / 编辑图像 / 图像变体；文字转语音 vs 文本转语音；语音转文字 vs 音频转录；语音翻译成英文 vs 音频翻译。同一个动作在侧栏里两种叫法，「转录」和「转文字」用户会以为是两个能力。</li>
+        <li><b>读面归属没规则</b>：<code>catalog.go:97</code> 只取 <code>groupKinds</code> 的 main，查询 / 下载 / 取消不进目录。视频板块拆分后，读面到底跟「直挂统一入口」还是跟某个格式组，代码里没有判据。</li>
+        <li><b>后端没有 dialects 这个事实</b>：<code>DocEndpointDoc</code> 只有 <code>Section</code> 与 <code>Group</code>（<code>model/doc_endpoint.go:30-36</code>），而 <code>Group</code> 已经被「通用接口导航子组」占用且每次启动重写。<b>复用它存格式会把板块归属覆盖掉</b>，必须新增独立列。</li>
+        <li><b>同路径的方言篇会撞主键（最容易被忽略的一条）</b>：<code>doc_endpoint_docs</code> 主键是 <code>endpoint_kind</code> <b>单列</b>（<code>model/doc_endpoint.go:29-30</code>），一个 Kind 只能有一篇文档。而 <code>/v1/images/generations</code> 与 <code>/v1/video/generations</code> 各要两篇（原生 / 即梦）。不把主键改成 <code>(endpoint_kind, dialect)</code>，这两处就只能二选一 —— 字段表必然对一半模型说谎。slug 也要跟着改：<code>ep-images-generations</code> 与 <code>ep-images-generations--jimeng</code>。</li>
+      </ul>
+
+      <h3>P2 · 一致性与去敏</h3>
+      <ul class="pt-list">
+        <li><b>排序按 kind 声明顺序</b>（<code>endpointTable:195</code>），不是「直挂 → 格式组」；图像板块会把异步提交混在同步接口中间。</li>
+        <li><b>禁词与品牌命名冲突</b>：参考图要求把「即梦 / 可灵 / SUNO」写进组名，而现有去敏表把这些词也一并禁掉。需要把「模型品牌（可写）」与「转发平台（Ark / 火山 / 方舟 / 多米 / metaso / AutoDL，不可写）」分开。</li>
+        <li><b>模型文档与接口文档两套分组口径</b>：模型文档按 vendor + 类型签名分桶，接口文档按 kind 一篇，同一家厂商在侧栏出现两种形状。</li>
+      </ul>
+    </section>
+
+    <section class="pt-card">
+      <h2>现状 → 这一版</h2>
+      <div class="pt-ba">
+        <div>
+          <h4>现状（后端 catalog 真实输出）</h4>
+          <ul>
+            <li>开始使用</li>
+            <li>通用接口 → 模型清单 / 文件与产物 / 异步任务 / 账户与用量</li>
+            <li>语言模型 → 对话补全 / 文本补全 / 新版智能体接口 / 对话补全（Anthropic 格式）</li>
+            <li>向量与检索 → 文本向量化 / 相关性重排</li>
+            <li>图片模型 → 图片生成 / 图片编辑（传文件）/ 图片变体 / 图片生成（异步任务）</li>
+            <li>视频模型 → 创建 / 再生成 / 列表 / 查询 / 下载 / 取消（6 条平铺）</li>
+            <li>音频模型 → 文字转语音 / 语音转文字 / 语音翻译成英文</li>
+            <li>音乐模型 → 音乐生成 / 歌词生成</li>
+            <li>内容安全 → 内容审核</li>
+          </ul>
+        </div>
+        <div>
+          <h4>这一版</h4>
+          <ul>
+            <li>开始使用（不变）</li>
+            <li>通用接口（不变）</li>
+            <li><b>AI 模型接口</b>（新容器）
+              <ul>
+                <li>音频（Audio）→ 原生OpenAI格式</li>
+                <li>聊天（Chat）→ 原生Claude格式 / 原生OpenAI格式</li>
+                <li>补全（Completions）→ 原生OpenAI格式</li>
+                <li>嵌入（Embeddings）→ 原生OpenAI格式</li>
+                <li>图像（Images）→ 直挂异步 / 即梦格式 / 原生OpenAI格式</li>
+                <li>审核（Moderations）→ 原生OpenAI格式</li>
+                <li>音乐（Music）→ SUNO格式</li>
+                <li>重排（Rerank）→ 通用格式</li>
+                <li>视频（Videos）→ 直挂统一入口 / 即梦格式</li>
+              </ul>
+            </li>
+          </ul>
+        </div>
+      </div>
+    </section>
+
+    <section class="pt-card">
+      <h2>修正方案（5 个 PR，每个都能独立上线不破站）</h2>
+
+      <table class="pt-tbl">
+        <tr><th style="width:64px">PR</th><th>改什么</th><th style="width:34%">验收要点</th></tr>
+        <tr>
+          <td><b>PR1</b><br><span class="pt-tag">契约</span></td>
+          <td>新增 <code>apidoc.Dialect</code> 常量与 <code>endpointTable</code> 的 <code>Dialect</code> 列（openai / claude / jimeng / suno / generic / platform）；新增 <code>DialectTitle</code> 做「归属方 + 协议 + 格式」命名推导；<code>Section</code> 加 <code>En</code> 字段并把 <code>lang</code> 拆成 chat/completions、<code>vec</code> 拆成 embeddings/rerank。<b>不动运行期、不动数据库</b>。</td>
+          <td>每个 <code>Kind</code> 必须声明 Dialect（漏声明测试红）；<code>Section</code> 的 En 与中文名成对出现；<code>TestEveryRelayKindMapsToContract</code> 仍双向绿。</td>
+        </tr>
+        <tr>
+          <td><b>PR2</b><br><span class="pt-tag">数据</span></td>
+          <td><code>doc_endpoint_docs</code> 主键改 <code>(endpoint_kind, dialect)</code>（新增幂等 DDL <code>migrations_doc_endpoint_dialect.go</code>，存量行回填 <code>dialect='openai'</code>）；<code>EndpointDocSet()</code> 按 <code>(kind, dialect)</code> 派生行集合；slug 规则加 <code>--&lt;dialect&gt;</code> 后缀。</td>
+          <td>迁移幂等（跑两遍不报错）；存量 42 篇 slug 全部不变；旧 slug 301 到新 slug；行集合仍由契约决定（运营不能增删）。</td>
+        </tr>
+        <tr>
+          <td><b>PR3</b><br><span class="pt-tag">投影</span></td>
+          <td><code>CatalogEndpointGroup</code> 增 <code>Kind</code>（group / leaf）、<code>Method</code>、<code>Path</code>、<code>Endpoint</code>；<code>groupEndpoints</code> 改成「板块 → 格式组」两层归并，实现单接口折叠与排序（直挂在前、组按归属方英文序）。</td>
+          <td>catalog 形状版本 +1 并在前端校验；空板块仍被剔除；叶子组的 <code>Method</code> 非空（前端要画徽标）；同一板块内组序稳定。</td>
+        </tr>
+        <tr>
+          <td><b>PR4</b><br><span class="pt-tag">前端</span></td>
+          <td><code>DocsSidebar</code> 渲染三层：容器可折叠、板块可折叠、格式组可折叠或叶子；折叠态存 <code>localStorage</code>；搜索能命中格式组名与接口名。</td>
+          <td>三个可折叠层级互不串味；刷新后折叠态保持；键盘 Tab 顺序 = 视觉顺序；移动端不出现横向滚动。</td>
+        </tr>
+        <tr>
+          <td><b>PR5</b><br><span class="pt-tag">内容</span></td>
+          <td>接口改名与格式上移（图片生成→生成图像、文字转语音→文本转语音、语音转文字→音频转录、语音翻译成英文→音频翻译、去掉「（Anthropic 格式）」「（传文件）」）；删 <code>camera_control</code> / <code>volume</code> / <code>pitch</code>；gpt-image 官方字段从 <code>TierVendor</code> 改 <code>TierStandard</code>；去敏拆「品牌可写 / 转发平台不可写」两张表；模型文档签名并入 dialect。</td>
+          <td>改名后旧链接 301；<code>neutral_test.go</code> 不出现转发平台名；每个 <code>TierVendor</code> 字段都能在 <code>adapters/</code> 找到读取点（新增门禁测试）。</td>
+        </tr>
+      </table>
+    </section>
+
+    <section class="pt-card">
+      <h2>需要你拍板的 3 件事</h2>
+
+      <div class="pt-q">
+        <b>① 视频的读面（查询 / 下载 / 取消）挂哪？</b><br>
+        建议直挂板块，与「创建视频任务」同层（原型即此写法）。理由：读面与格式无关，任何格式创建的任务都走同一套查询，塞进某个格式组会让另外几组看起来没有查询接口。
+      </div>
+
+      <div class="pt-q">
+        <b>② 同一条路径、两套报文（<code>/v1/images/generations</code> 与 <code>/v1/video/generations</code>）允许出现两次吗？</b><br>
+        建议允许，靠父级格式组区分（原型里「生成图像」在即梦格式与原生OpenAI格式各出现一次）。代价是必须把 <code>doc_endpoint_docs</code> 主键改成 <code>(endpoint_kind, dialect)</code> 并给 slug 加 <code>--jimeng</code> 后缀 —— 这是本轮唯一一处要动主键的改动，不确认就不能动工。
+      </div>
+
+      <div class="pt-q">
+        <b>③ 伪能力字段怎么处理？</b><br>
+        建议从文档删除 <code>camera_control</code> / <code>volume</code> / <code>pitch</code>（代码里没有实现，写上就是骗人）；若确实要支持，走「先实现适配器 → 再进文档」。这一条会改 <code>endpoints.go</code> 三行，不影响计费。
+      </div>
+
+      <p class="sub" style="margin-top:14px">确认后按 PR1（契约新增 dialect 事实，不动运行期）→ PR2（catalog 三层投影）→ PR3（前端折叠/叶子）→ PR4（命名与去敏）→ PR5（删伪字段 + 测试）落地。</p>
+    </section>
+
+  </main>
+</div>
+
+<script>
+/* ── 目录数据：与后端 endpointTable / dialect 表一一对应 ── */
+const START = ["快速开始", "鉴权与密钥", "请求与错误", "限流与配额", "计费与结算"];
+
+const COMMON = [
+  { name: "模型清单", items: [
+    { n: "可用模型列表", m: "GET", p: "/v1/models" },
+    { n: "单模型查询", m: "GET", p: "/v1/models/{model}" },
+    { n: "各类默认模型", m: "GET", p: "/v1/models/defaults" },
+  ]},
+  { name: "文件与产物", items: [
+    { n: "上传文件", m: "POST", p: "/v1/files" },
+    { n: "文件列表", m: "GET", p: "/v1/files" },
+    { n: "查询文件", m: "GET", p: "/v1/files/{id}" },
+    { n: "下载文件内容", m: "GET", p: "/v1/files/{id}/content" },
+    { n: "删除文件", m: "DELETE", p: "/v1/files/{id}" },
+    { n: "文件直链下载", m: "GET", p: "/f/{id}/{name}" },
+    { n: "产物代理", m: "GET", p: "/v1/media/{token}" },
+  ]},
+  { name: "异步任务", items: [
+    { n: "任务列表", m: "GET", p: "/v1/tasks" },
+    { n: "任务详情", m: "GET", p: "/v1/tasks/{id}" },
+    { n: "下载首个产物", m: "GET", p: "/v1/tasks/{id}/content" },
+    { n: "下载指定产物", m: "GET", p: "/v1/tasks/{id}/contents/{index}" },
+    { n: "取消任务", m: "DELETE", p: "/v1/tasks/{id}" },
+  ]},
+  { name: "账户与用量", items: [
+    { n: "账户信息", m: "GET", p: "/v1/account" },
+    { n: "调用明细", m: "GET", p: "/v1/usage" },
+    { n: "用量汇总", m: "GET", p: "/v1/usage/summary" },
+    { n: "订阅配额（兼容）", m: "GET", p: "/v1/dashboard/billing/subscription" },
+    { n: "累计用量（兼容）", m: "GET", p: "/v1/dashboard/billing/usage" },
+  ]},
+];
+
+/* 板块顺序＝英文名字母序（Audio / Chat / Completions / Embeddings / Images / Moderations / Music / Rerank / Videos） */
+const CAPS = [
+  { cn: "音频", en: "Audio", color: "#f59e0b", groups: [
+    { name: "原生OpenAI格式", items: [
+      { n: "文本转语音", m: "POST", p: "/v1/audio/speech" },
+      { n: "音频转录", m: "POST", p: "/v1/audio/transcriptions" },
+      { n: "音频翻译", m: "POST", p: "/v1/audio/translations" },
+    ]},
+  ]},
+  { cn: "聊天", en: "Chat", color: "#6366f1", groups: [
+    { name: "原生Claude格式", items: [{ n: "对话补全", m: "POST", p: "/v1/messages" }] },
+    { name: "原生OpenAI格式", items: [
+      { n: "对话补全", m: "POST", p: "/v1/chat/completions" },
+      { n: "新版智能体接口", m: "POST", p: "/v1/responses" },
+    ]},
+  ]},
+  { cn: "补全", en: "Completions", color: "#6366f1", groups: [
+    { name: "原生OpenAI格式", items: [{ n: "文本补全", m: "POST", p: "/v1/completions" }] },
+  ]},
+  { cn: "嵌入", en: "Embeddings", color: "#0ea5e9", groups: [
+    { name: "原生OpenAI格式", items: [{ n: "文本向量化", m: "POST", p: "/v1/embeddings" }] },
+  ]},
+  { cn: "图像", en: "Images", color: "#8b5cf6", notes: ["直挂：平台自有异步入口，与格式无关"],
+    dirs: [{ n: "异步生成图像", m: "POST", p: "/v1/images/generations/async" }],
+    groups: [
+      { name: "即梦格式", items: [{ n: "生成图像（Seedream 扩展字段）", m: "POST", p: "/v1/images/generations" }] },
+      { name: "原生OpenAI格式", items: [
+        { n: "生成图像", m: "POST", p: "/v1/images/generations" },
+        { n: "编辑图像", m: "POST", p: "/v1/images/edits" },
+        { n: "图像变体", m: "POST", p: "/v1/images/variations" },
+      ]},
+    ]},
+  { cn: "审核", en: "Moderations", color: "#ef4444", groups: [
+    { name: "原生OpenAI格式", items: [{ n: "内容审核", m: "POST", p: "/v1/moderations" }] },
+  ]},
+  { cn: "音乐", en: "Music", color: "#14b8a6", groups: [
+    { name: "SUNO格式", items: [
+      { n: "音乐生成", m: "POST", p: "/v1/audio/music/generations" },
+      { n: "歌词生成", m: "POST", p: "/v1/audio/lyrics" },
+    ]},
+  ]},
+  { cn: "重排", en: "Rerank", color: "#0ea5e9", groups: [
+    { name: "通用格式", items: [{ n: "相关性重排", m: "POST", p: "/v1/rerank" }] },
+  ]},
+  { cn: "视频", en: "Videos", color: "#ec4899", notes: ["直挂：平台统一入口（各家视频模型共用一套提交/查询/下载）"],
+    dirs: [
+      { n: "创建视频任务", m: "POST", p: "/v1/video/generations" },
+      { n: "视频再生成（升档）", m: "POST", p: "/v1/video/regenerations" },
+      { n: "视频任务列表", m: "GET", p: "/v1/video/generations" },
+      { n: "查询视频任务", m: "GET", p: "/v1/video/generations/{id}" },
+      { n: "下载视频文件", m: "GET", p: "/v1/video/generations/{id}/content" },
+      { n: "取消视频任务", m: "DELETE", p: "/v1/video/generations/{id}" },
+    ],
+    groups: [
+      { name: "即梦格式", items: [{ n: "创建视频任务（原生 content[] 报文）", m: "POST", p: "/v1/video/generations" }] },
+    ]},
+];
+
+/* ── 渲染 ── */
+const el = (tag, cls, txt) => {
+  const n = document.createElement(tag);
+  if (cls) n.className = cls;
+  if (txt != null) n.textContent = txt;
+  return n;
+};
+const badge = (t) => el("i", "lv", t);
+const caret = (on) => el("i", "dc-side-caret" + (on ? " on" : ""));
+
+/** 接口行（L3）；叶子格式组也复用它，只是标签换成组名 */
+function itemRow(label, m, p, isLeafFmt) {
+  const row = el("button", "dc-side-item");
+  row.type = "button";
+  row.title = p ? label + "  " + m + " " + p : label;
+  if (isLeafFmt) row.classList.add("leaf-fmt");
+  const lbl = el("span", "dc-side-lbl", label);
+  row.append(lbl);
+  const mb = el("i", "api-mth " + m, m);
+  row.append(mb);
+  if (p) row.append(el("span", "lv-path", m + " " + p));
+  // 点击选中态（原型只表达层级，不做路由）
+  row.addEventListener("click", () => {
+    document.querySelectorAll(".dc-side-item.on, .dc-side-fmt.on").forEach((x) => x.classList.remove("on"));
+    row.classList.add("on");
+  });
+  return row;
+}
+
+/** 格式组（L2）：单接口 → 叶子；多接口 → 可折叠 */
+function fmtGroup(g) {
+  const leaf = g.items.length === 1;
+  if (leaf) {
+    const only = g.items[0];
+    // 叶子：组名 + 方法徽标（参考图「补全 → 原生OpenAI格式 POST」）
+    const row = el("button", "dc-side-fmt leaf");
+    row.type = "button";
+    row.append(caret(false));
+    row.append(el("span", "dc-side-fmt-t", g.name));
+    row.append(el("i", "api-mth " + only.m, only.m));
+    if (only.p) row.append(el("span", "lv-path", only.m + " " + only.p));
+    row.append(badge("L2 格式组"));
+    row.title = g.name + " · " + only.n + "  " + only.m + " " + only.p;
+    row.addEventListener("click", () => {
+      document.querySelectorAll(".dc-side-item.on, .dc-side-fmt.on").forEach((x) => x.classList.remove("on"));
+      row.classList.add("on");
+    });
+    return row;
+  }
+  const wrap = el("div", "dc-side-wrap");
+  const head = el("button", "dc-side-fmt");
+  head.type = "button";
+  head.append(caret(true));
+  head.append(el("span", "dc-side-fmt-t", g.name));
+  head.append(badge("L2 格式组"));
+  const body = el("div", "dc-side-fmt-body");
+  g.items.forEach((it) => body.append(itemRow(it.n, it.m, it.p, false)));
+  head.addEventListener("click", () => {
+    const open = body.hidden;
+    body.hidden = !open;
+    head.querySelector(".dc-side-caret").classList.toggle("on", open);
+  });
+  wrap.append(head, body);
+  return wrap;
+}
+
+/** 板块（L1） */
+function capSection(c) {
+  const wrap = el("div", "dc-side-wrap");
+  const head = el("button", "dc-side-sec");
+  head.type = "button";
+  head.append(caret(true));
+  const dot = el("i", "dc-dot");
+  dot.style.background = c.color;
+  head.append(dot);
+  const t = el("span", "dc-side-sec-t", c.cn);
+  t.append(el("em", null, "（" + c.en + "）"));
+  head.append(t, badge("L1 板块"));
+
+  const body = el("div", "dc-side-body");
+  (c.notes || []).forEach((n) => body.append(el("div", "lv-note", n)));
+  (c.dirs || []).forEach((it) => body.append(itemRow(it.n, it.m, it.p, false)));
+  if ((c.dirs || []).length && (c.groups || []).length) body.append(el("div", "dc-side-sep"));
+  (c.groups || []).forEach((g) => body.append(fmtGroup(g)));
+
+  head.addEventListener("click", () => {
+    const open = body.hidden;
+    body.hidden = !open;
+    head.querySelector(".dc-side-caret").classList.toggle("on", open);
+  });
+  wrap.append(head, body);
+  return wrap;
+}
+
+function build() {
+  const root = document.getElementById("tree");
+
+  // 开始使用
+  const s1 = el("div", "dc-side-wrap");
+  const h1 = el("button", "dc-side-sec");
+  h1.type = "button";
+  h1.append(caret(true));
+  const d1 = el("i", "dc-dot"); d1.style.background = "#94a3b8";
+  h1.append(d1, el("span", "dc-side-sec-t", "开始使用"), badge("L1 板块"));
+  const b1 = el("div", "dc-side-body");
+  START.forEach((n) => {
+    const r = el("button", "dc-side-item");
+    r.type = "button";
+    r.append(el("span", "dc-side-lbl", n));
+    r.addEventListener("click", () => {
+      document.querySelectorAll(".dc-side-item.on").forEach((x) => x.classList.remove("on"));
+      r.classList.add("on");
+    });
+    b1.append(r);
+  });
+  h1.addEventListener("click", () => {
+    const open = b1.hidden; b1.hidden = !open;
+    h1.querySelector(".dc-side-caret").classList.toggle("on", open);
+  });
+  s1.append(h1, b1);
+  root.append(s1);
+
+  // 通用接口
+  const s2 = el("div", "dc-side-wrap");
+  const h2 = el("button", "dc-side-sec");
+  h2.type = "button";
+  h2.append(caret(true));
+  const d2 = el("i", "dc-dot"); d2.style.background = "#6366f1";
+  h2.append(d2, el("span", "dc-side-sec-t", "通用接口"), badge("L1 板块"));
+  const b2 = el("div", "dc-side-body");
+  COMMON.forEach((g) => b2.append(fmtGroup({ name: g.name, items: g.items })));
+  h2.addEventListener("click", () => {
+    const open = b2.hidden; b2.hidden = !open;
+    h2.querySelector(".dc-side-caret").classList.toggle("on", open);
+  });
+  s2.append(h2, b2);
+  root.append(s2);
+
+  // AI 模型接口（L0 容器）
+  const box = el("div", "dc-side-wrap");
+  const bh = el("button", "dc-side-wrap-t");
+  bh.type = "button";
+  bh.append(caret(true), el("span", null, "AI 模型接口"), el("span", "cnt", CAPS.length + " 个能力"), badge("L0 容器"));
+  const bb = el("div", "dc-side-wrap-b");
+  CAPS.forEach((c) => bb.append(capSection(c)));
+  bh.addEventListener("click", () => {
+    const open = bb.hidden; bb.hidden = !open;
+    bh.querySelector(".dc-side-caret").classList.toggle("on", open);
+  });
+  box.append(bh, bb);
+  root.append(box);
+}
+build();
+
+document.getElementById("anno").addEventListener("change", (e) => {
+  document.body.classList.toggle("anno", e.target.checked);
+});
+document.getElementById("theme").addEventListener("click", (e) => {
+  const dark = document.documentElement.getAttribute("data-theme") === "dark";
+  document.documentElement.setAttribute("data-theme", dark ? "light" : "dark");
+  e.target.textContent = dark ? "暗色" : "亮色";
+});
+</script>
+</body>
+</html>

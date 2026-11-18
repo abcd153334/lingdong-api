@@ -1,0 +1,169 @@
+/* ============================================================
+   应用插件（声明式）
+   ------------------------------------------------------------
+   两处界面：应用管理弹窗的「插件」页签（清单 + 导入）、
+   插件自己的泛化页面（/admin/apps/:id/p/:key 的工具栏与表单）。
+   只用既有令牌，不引入新色板；滚动条与容器宽度沿用全局规则。
+   ============================================================ */
+
+/* ---------- 工具栏（实体切换 / 搜索 / 新建 / 导出） ---------- */
+.plugin-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+/* 搜索框给一个上限，否则在 1080 宽的页面里会横到看不见按钮。
+   宽度写在容器上（X14：控件宽度归容器，不归控件）。 */
+.plugin-toolbar .plugin-search {
+  width: 220px;
+  max-width: 100%;
+}
+.plugin-toolbar .btn {
+  flex: none;
+}
+
+/* ---------- 弹窗里的两段清单 ---------- */
+.plugin-sec {
+  margin-bottom: 18px;
+}
+.plugin-sec__head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+.plugin-sec__head .blk-title {
+  margin: 0;
+}
+.plugin-sec__grow {
+  flex: 1;
+}
+.plugin-list {
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  background: var(--card);
+}
+.plugin-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 12px;
+  border-bottom: 1px solid var(--border);
+}
+.plugin-row:last-child {
+  border-bottom: 0;
+}
+.plugin-row__main {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  flex: 1;
+  min-width: 0;
+}
+.plugin-row__name {
+  font-weight: 600;
+  color: var(--t1);
+}
+.plugin-row__acts {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  flex: none;
+}
+/* 破坏性动作用危险色，但仍是文字按钮：这里一行最多 4 个动作，
+   再给红底实心按钮会让整块界面像警告页。 */
+.plugin-row__acts .plugin-danger {
+  color: var(--danger);
+}
+.plugin-row__acts .btn[disabled] {
+  color: var(--t3);
+}
+
+/* ---------- 表单单列 ---------- */
+/* 全站 .form-grid 到 ≤359px 才降单列，375px 下两列每列只剩 159px，
+   日期/链接会被压到看不见内容。插件表单固定单列，不改全局断点。 */
+.plugin-form {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 12px;
+}
+.plugin-form .form-item {
+  margin-bottom: 0;
+}
+
+/* ---------- 导入预检结果 ---------- */
+.plugin-check {
+  margin-top: 12px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  background: var(--card-2);
+}
+.plugin-check__ok {
+  color: var(--success);
+  font-size: 12.5px;
+}
+.plugin-check__bad {
+  color: var(--danger);
+  font-size: 12.5px;
+}
+.plugin-problems {
+  margin: 8px 0 0;
+  padding-left: 18px;
+  font-size: 12.5px;
+  color: var(--t2);
+  line-height: 1.9;
+}
+.plugin-problems code {
+  font-family: var(--mono);
+  font-size: 11.5px;
+  color: var(--t1);
+  margin-right: 4px;
+}
+
+/* 多行文本在表格里保留换行（备注/详情挤成一行等于逼人点开看） */
+.pre-wrap {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+/* ---------- 窄屏 ---------- */
+@media (max-width: 767px) {
+  .plugin-toolbar .plugin-search {
+    width: 100%;
+  }
+  .plugin-row {
+    flex-wrap: wrap;
+    align-items: flex-start;
+  }
+  /* 动作换到第二行并贴左：与第一行的名称对齐，而不是被挤成窄条 */
+  .plugin-row__acts {
+    width: 100%;
+    flex-wrap: wrap;
+  }
+}
+
+/* 对外只读：一行开关 + 地址。
+   地址必须允许折行（`overflow-wrap:anywhere`）：375px 下这条 URL 有 60+ 字符，
+   不给折行会把整块撑出抽屉与页面。 */
+.plugin-public {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  background: var(--card-2);
+}
+.plugin-public__url {
+  flex: 1 1 240px;
+  min-width: 0;
+  overflow-wrap: anywhere;
+  font-family: var(--mono);
+  font-size: 12px;
+  color: var(--t2);
+}

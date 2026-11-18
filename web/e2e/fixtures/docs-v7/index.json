@@ -1,0 +1,4 @@
+{
+  "node": "openai",
+  "endpoint": "ep-chat-completions"
+}

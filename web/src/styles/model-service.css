@@ -1,0 +1,646 @@
+/* ============================================================
+   模型服务（/admin/model-service）：适配器 → 渠道 → 模型
+   ------------------------------------------------------------
+   页面四面贴边、没有标题行。两处 `:has()` 是"逃逸"掉布局的默认内边距：
+   `.a-content` 原本是 `padding:24px; gap:var(--gap-lg)`，而这一页的左右两栏
+   必须顶到浏览器边缘、两栏各自滚动。
+   **`gap:0` 必须写**：现在流内只有一个子元素不会出错，但任何人加第二个兄弟节点
+   就会凭空多 18px，症状是"贴边突然不贴了"，极难定位到是这里。
+   为什么不直接复用 `.agent-ws`：高度策略同、滚动契约相反（助手只允许
+   `.agent-thread` 滚，本页两栏各自滚）。共用会把 `.ms-*` 塞进 X8 的 agent 白名单。
+   本文件只用 tokens.css 里**已定义**的变量（--card-2/--t2/--t3 在 tokens.css:41,51,52
+   都有定义，别再照抄"它们未定义"的旧说法）。
+
+   **左栏的行度量对标全局侧栏**（components.css 的 `.a-side .nav-row`：40px / 13.5px /
+   圆角 --r-sm / hover 与选中只有一种色块语言）。改左栏行高或字号时必须同时看那一处，
+   两套节奏并存就是"左栏像另一个产品"的来源。
+   ============================================================ */
+.a-layout:has(.ms-ws) {
+  height: 100vh;
+  height: 100dvh;
+  min-height: 0;
+}
+.a-content:has(> .ms-ws) {
+  padding: 0;
+  gap: 0;
+  min-height: 0;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+.ms-ws {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  background: var(--card);
+  /* 抽屉（≤899）是页内 absolute 定位：没有这一行，它会相对初始包含块跑到视口左上 */
+  position: relative;
+}
+
+/* ---------------- 左栏 ---------------- */
+/* 几何（级联靠它读出来，动之前先算一遍）：
+     列表 padding-left 10 + 行 padding 12 = 22
+     适配器：caret(14) + gap(8) → 图标 x=44 → label x=70
+     渠道：  margin-left 11 + border 1 + padding-left 10 → 内容 x=44 → 图标 x=44 → name x=70
+   两级图标同一列、文字同一列 —— 这是"级联"与"两段无关列表"的唯一区别。 */
+.ms-rail {
+  width: 300px;
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  /* 用 --bg 而不是 --card：右栏是白卡，左栏用页面底色区分层级（1px 线只是兜底）。
+     也正因为底色是 --bg，hover 必须用 --bg-2（"贴在 --bg 上的悬浮块"）：
+     --card-2 是贴在白卡上的浅块，在浅灰底上会比周围更白，看起来像被点亮。 */
+  background: var(--bg);
+  border-right: 1px solid var(--border);
+}
+/* 抽屉态才有（JS 只在 drawer 为真时渲染），桌面不存在这个节点 */
+.ms-rail__head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px 4px;
+  flex-shrink: 0;
+}
+.ms-rail__title {
+  flex: 1;
+  font-size: 13.5px;
+  font-weight: 600;
+  color: var(--t1);
+}
+.ms-rail__list {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 8px 10px;
+  display: flex;
+  flex-direction: column;
+}
+.ms-rail__foot {
+  padding: 6px 10px 10px;
+  border-top: 1px solid var(--border);
+  flex-shrink: 0;
+}
+/* 底部动作是与列表同节奏的 ghost 行，不是实心主色块：
+   主色在本页只表示"选中"，第二个主色块会把它稀释掉。 */
+.ms-new {
+  width: 100%;
+  height: 40px;
+  padding: 0 12px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  border: 0;
+  background: transparent;
+  border-radius: var(--r-sm);
+  color: var(--t2);
+  font: inherit;
+  font-size: 13.5px;
+  cursor: pointer;
+  transition: 0.15s;
+}
+.ms-new:hover {
+  color: var(--t1);
+  background: var(--bg-2);
+}
+.ms-new:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: -2px;
+}
+
+.ms-grp {
+  display: flex;
+  flex-direction: column;
+}
+/* 组间距必须明显大于组内行距（1px），否则邻近性把层级糊掉 */
+.ms-grp + .ms-grp {
+  margin-top: 10px;
+}
+.ms-grp__head {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+/* 适配器行：与 .a-side .nav-row 同度量（40px / 13.5px / 圆角 10 / 15ms 过渡） */
+.ms-gh {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 40px;
+  padding: 0 12px;
+  margin: 2px 0;
+  border: 0;
+  background: transparent;
+  border-radius: var(--r-sm);
+  color: var(--t1);
+  font: inherit;
+  font-size: 13.5px;
+  font-weight: 600;
+  text-align: left;
+  cursor: pointer;
+  transition: 0.15s;
+}
+.ms-gh:hover {
+  background: var(--bg-2);
+}
+.ms-gh:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: -2px;
+}
+/* 收起的组里还留着当前选中的渠道时，只给字色 —— 复用它侧栏 `.nav-group.on` 的语义 */
+.ms-gh.is-focus {
+  color: var(--primary);
+}
+.ms-gh__caret {
+  flex-shrink: 0;
+  color: var(--t3);
+  transition: transform 0.15s ease;
+}
+/* chevronDown：展开朝下、收起转 -90° 变 ▸，与 .nav-caret.closed 同一手势 */
+.ms-gh:not(.is-open) .ms-gh__caret {
+  transform: rotate(-90deg);
+}
+.ms-gh__label {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* 组头只放结构性元数据：纯文字，不做胶囊（行内状态才用 Tag） */
+.ms-gh__tag {
+  flex-shrink: 0;
+  font-size: 11px;
+  font-weight: 400;
+  color: var(--t2);
+}
+.ms-gh__tag.is-off {
+  color: var(--warning);
+}
+.ms-gh__count {
+  flex-shrink: 0;
+  font-size: 11.5px;
+  font-weight: 400;
+  color: var(--t2);
+  font-variant-numeric: tabular-nums;
+}
+.ms-gh__add {
+  width: 26px;
+  height: 26px;
+  flex-shrink: 0;
+  display: grid;
+  place-items: center;
+  border: 0;
+  background: transparent;
+  border-radius: 6px;
+  color: var(--t2);
+  cursor: pointer;
+}
+.ms-gh__add:hover {
+  color: var(--t1);
+  background: var(--bg-2);
+}
+.ms-gh__add:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: -2px;
+}
+/* 孤儿桶的组头不可点：用 padding 补出 caret 的宽度，让 alert 图标仍落在 x=44 */
+.ms-gh--static {
+  padding-left: 34px;
+  cursor: default;
+}
+.ms-gh--static .ms-gh__label {
+  color: var(--t2);
+  font-weight: 600;
+}
+.ms-gh__warn {
+  flex-shrink: 0;
+  color: var(--warning);
+}
+
+/* 渠道组：缩进 + 1px 导轨表达父子（与 .nav-sub 同一几何语言） */
+.ms-chs {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  margin-left: 11px;
+  padding-left: 10px;
+  padding-bottom: 2px;
+  /* 导轨用 --border-h 而不是 --border：后者贴白卡够看，贴 --bg 时对比只有 1.1:1，
+     整条线等于不存在 —— 级联的父子关系就只剩"缩进了几像素"这一条线索。 */
+  border-left: 1px solid var(--border-h);
+}
+.ms-ch {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 36px;
+  padding: 0 12px;
+  margin: 1px 0;
+  border: 0;
+  background: transparent;
+  border-radius: var(--r-sm);
+  color: var(--t2);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 400;
+  text-align: left;
+  cursor: pointer;
+  transition: 0.15s;
+}
+.ms-ch:hover {
+  color: var(--t1);
+  background: var(--bg-2);
+}
+.ms-ch:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: -2px;
+}
+/* 选中态与侧栏 `.nav-item.active` 逐条同款：底色 + 主色 + 字重。
+   **不画左侧竖条**：components.css 明令那条 inset 是后台模板的通用装饰，
+   admin-chrome.spec 还有 `boxShadow === "none"` 的断言。 */
+.ms-ch[aria-current="true"] {
+  color: var(--primary);
+  background: var(--primary-bg);
+  font-weight: 600;
+}
+.ms-ch__name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ms-ch__meta {
+  flex-shrink: 0;
+  font-size: 11.5px;
+  color: var(--t2);
+  white-space: nowrap;
+}
+.ms-ch__meta.is-off {
+  color: var(--warning);
+}
+/* 固定槽：组内最后一项，虚线边框表示"这里还能加一个" */
+.ms-add-dashed {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  height: 32px;
+  margin-top: 2px;
+  padding: 0 8px;
+  border: 1px dashed var(--border-h);
+  border-radius: var(--r-sm);
+  background: transparent;
+  color: var(--t2);
+  font: inherit;
+  font-size: 12.5px;
+  cursor: pointer;
+}
+.ms-add-dashed:hover {
+  border-color: var(--primary);
+  color: var(--primary);
+}
+.ms-add-dashed:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: -2px;
+}
+.ms-grp__note {
+  margin: 2px 0 0;
+  /* 60 = 10（列表内边距）+ 34（补 caret 宽）+ 16，与组头文字左边界对齐 */
+  padding: 0 8px 4px 60px;
+  font-size: 11.5px;
+  color: var(--t2);
+}
+
+/* 抽屉遮罩：页内绝对定位，**不用全局 .mask**（那是 fixed，会连 768–899 常驻的
+   全局侧栏一起蒙住，而抽屉本身被 .a-content{overflow:hidden} 裁在内容区里）。 */
+.ms-scrim {
+  position: absolute;
+  inset: 0;
+  z-index: 55;
+  background: rgba(9, 11, 18, 0.45);
+  backdrop-filter: blur(2px);
+}
+
+/* ---------------- 右栏 ---------------- */
+.ms-main {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  background: var(--card);
+}
+/* 功能性工具条（不是标题行）：左侧是当前渠道，右侧是"只改绑定"的说明 */
+.ms-main__bar {
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  flex-shrink: 0;
+}
+.ms-chanbar__id {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+.ms-chanbar__id b {
+  font-size: var(--fs-md);
+}
+.ms-chanbar__note {
+  font-size: 11.5px;
+  opacity: 0.6;
+  margin-left: auto;
+}
+.ms-main__tools {
+  padding: 10px 14px 0;
+  flex-shrink: 0;
+}
+.ms-main__body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 10px 14px 14px;
+}
+
+/* 抽屉开关：桌面完全没有这个入口（左栏常驻），所以整块不占位 */
+.ms-rail-toggle {
+  display: none;
+}
+
+/* ---------------- 窄屏 ---------------- */
+@media (max-width: 1179px) {
+  .ms-rail {
+    width: 260px;
+  }
+}
+/* ≤899 左栏变抽屉：两栏挤在 900px 以下时，300px 的导航会让模型表只剩 4 列。
+   断点必须与 lib/responsive.ts 的 RAIL_DRAWER_QUERY 逐字一致 —— JS 侧要靠它决定
+   inert / role / 焦点陷阱，两侧错开就是"抽屉打开了但键盘进不去"。 */
+@media (max-width: 899px) {
+  .ms-rail {
+    position: absolute;
+    inset: 0 auto 0 0;
+    z-index: 60;
+    width: 260px;
+    transform: translateX(-100%);
+    transition: transform 0.2s;
+    box-shadow: var(--sh-md);
+  }
+  .ms-ws[data-rail="open"] .ms-rail {
+    transform: none;
+  }
+  .ms-main {
+    /* 抽屉浮在上面，右栏必须占满 */
+    width: 100%;
+  }
+  .ms-rail-toggle {
+    display: inline-flex;
+  }
+}
+
+/* ---------------- 右栏 · 适配器渠道总览 ---------------- */
+/* 总览不给内部滚动（跟页面一起滚）：多一个滚动容器就多一层嵌套滚动，
+   滚到底会把整页带走，且和深链的 scrollIntoView 抢滚动位置。 */
+.ms-ov__list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.ms-ov__row {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  border: 0;
+  background: transparent;
+  border-radius: var(--r-sm);
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: 0.15s;
+}
+.ms-ov__row:hover {
+  background: var(--bg-2);
+}
+.ms-ov__row:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: -2px;
+}
+.ms-ov__main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+.ms-ov__name {
+  font-size: var(--fs-md);
+  color: var(--t1);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ms-ov__url {
+  font-size: 11.5px;
+  color: var(--t2);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ms-ov__meta {
+  flex-shrink: 0;
+  font-size: 11.5px;
+  color: var(--t2);
+  white-space: nowrap;
+}
+/* 窄屏优先保住名称与状态：地址是最先可以牺牲的那一条 */
+@media (max-width: 767px) {
+  .ms-ov__url {
+    display: none;
+  }
+}
+
+/* ---------------- 右栏内的附属块 ---------------- */
+/* 「绑定已有模型」的选择列表：一行一个按钮，整行可点。 */
+.bd-list {
+  display: flex;
+  flex-direction: column;
+  max-height: 42vh;
+  overflow-y: auto;
+  margin-top: 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+}
+.bd-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  width: 100%;
+  padding: 8px 10px;
+  border: 0;
+  border-bottom: 1px solid var(--border);
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+}
+.bd-item:last-child {
+  border-bottom: 0;
+}
+.bd-item:hover:not(:disabled) {
+  background: var(--row-hover);
+}
+.bd-item:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+/* ---------------- 编辑渠道抽屉 · 密钥池（平铺，不再开二级抽屉） ----------------
+   为什么是行列表而不是表格：抽屉内容宽只有 516px，4 列紧凑表也顶到 500+；
+   `data-p` 的列隐藏按**视口**算，对固定宽容器完全失效。而行结构可以让
+   「编辑带」横跨整行，且不受表格 ≤767px 卡片化那条规则影响。
+   滚动容器仍然是 `.dr-body`：这里**不写** overflow，否则移动端会出现嵌套滚动。 */
+.ms-keys {
+  margin-bottom: 8px;
+}
+.ms-keys__head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 18px 0 8px;
+}
+.ms-keys__head .blk-title {
+  margin: 0;
+}
+.ms-keys__grow {
+  flex: 1;
+}
+.ms-keys__note {
+  margin: -2px 0 8px;
+}
+.ms-keys__acts {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+.ms-keys__acts .btn-text {
+  margin-left: auto;
+}
+.ms-keys__add {
+  margin-bottom: 10px;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  background: var(--card-2);
+}
+.ms-keys__add .form-item {
+  margin-bottom: 10px;
+}
+.ms-keys__add .form-item:last-of-type {
+  margin-bottom: 0;
+}
+.ms-keys__warn {
+  margin-bottom: 8px;
+  padding: 8px 10px;
+  border-radius: var(--r-sm);
+  background: var(--danger-bg);
+  color: var(--danger);
+  font-size: 12.5px;
+}
+.ms-keys__list {
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  background: var(--card);
+}
+.ms-key {
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--border);
+}
+.ms-key:last-child {
+  border-bottom: 0;
+}
+.ms-key:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: -2px;
+}
+.ms-key__top {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+/* 指纹 + 状态一组：窄屏（抽屉变底部 Sheet、内容 305px）时让状态徽标自己换行，
+   而不是把指纹压成「sk-」/「bbb…」/「2222」三行；开关与动作固定贴右不压缩，
+   否则第二把 key 多一个「重置冷却」就会把删除按钮挤出抽屉。 */
+.ms-key__id {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px 8px;
+  flex: 1;
+  min-width: 0;
+}
+.ms-key__fp {
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: 100%;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--t1);
+  font-family: var(--mono);
+  font-size: 12.5px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  text-align: left;
+  cursor: pointer;
+}
+.ms-key__fp:hover {
+  color: var(--primary);
+}
+.ms-key__fp.is-broken {
+  color: var(--t3);
+}
+.ms-key__end {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+.ms-key__sub {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 3px;
+  font-size: 12.5px;
+  color: var(--t2);
+}
+.ms-key__band {
+  margin-top: 10px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  background: var(--card-2);
+}
+.ms-key__band .form-item {
+  margin-bottom: 10px;
+}
+.ms-key__band .row-acts {
+  justify-content: flex-end;
+}

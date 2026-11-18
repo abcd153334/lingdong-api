@@ -1,0 +1,468 @@
+{
+  "node": {
+    "key": "openai",
+    "title": "OpenAI 兼容",
+    "section": "protocols",
+    "section_name": "语言"
+  },
+  "key": "ep-chat-completions",
+  "kind": "chat/completions",
+  "name": "对话补全",
+  "summary": "多轮对话主接口，可带图片。兼容 OpenAI Chat 格式，所有厂商模型统一调用。",
+  "method": "POST",
+  "path": "/v1/chat/completions",
+  "aliases": [],
+  "phase": "同步",
+  "transport": "json",
+  "run_mode": "sse",
+  "notes": [
+    "流式每帧的 delta.content 顺序拼接即完整回答；网关已自动向厂商申请回传用量，末帧带 usage。"
+  ],
+  "fields": [
+    {
+      "name": "model",
+      "type": "string",
+      "in": "body",
+      "required": "required",
+      "default": "—",
+      "desc": "用哪个模型，网关自动路由。",
+      "value_source": "none",
+      "tier": "P",
+      "example": "gpt-4o"
+    },
+    {
+      "name": "messages",
+      "type": "array",
+      "in": "body",
+      "required": "required",
+      "default": "—",
+      "desc": "对话记录数组。\n每项 {role, content}；role 取 system 立规矩 / user 用户说 / assistant 模型答。",
+      "value_source": "none",
+      "tier": "P",
+      "example": [
+        {
+          "content": "你是一个耐心的编程助手",
+          "role": "system"
+        },
+        {
+          "content": "用一句话解释什么是 API 网关",
+          "role": "user"
+        }
+      ]
+    },
+    {
+      "name": "messages[].role",
+      "type": "string",
+      "in": "body",
+      "required": "required",
+      "default": "—",
+      "desc": "这条是谁说的。",
+      "enum": [
+        {
+          "value": "system"
+        },
+        {
+          "value": "user"
+        },
+        {
+          "value": "assistant"
+        }
+      ],
+      "value_source": "static",
+      "tier": "S"
+    },
+    {
+      "name": "messages[].content",
+      "type": "any",
+      "in": "body",
+      "required": "required",
+      "default": "—",
+      "desc": "该条消息的内容。\n文字用字符串；发图用数组 [{type:\"text\",text:\"…\"},{type:\"image_url\",image_url:{url:\"…\"}}]。",
+      "value_source": "none",
+      "tier": "S"
+    },
+    {
+      "name": "stream",
+      "type": "boolean",
+      "in": "body",
+      "required": "optional",
+      "default": "false",
+      "desc": "打字机流式开关。\n开启后返回 text/event-stream，以 data: [DONE] 结束。",
+      "value_source": "none",
+      "tier": "S",
+      "example": false
+    },
+    {
+      "name": "temperature",
+      "type": "number",
+      "in": "body",
+      "required": "optional",
+      "default": "1",
+      "desc": "发散度：0 严谨，高值有创意。",
+      "value_source": "none",
+      "constraints": [
+        {
+          "kind": "min",
+          "value": 0,
+          "text": "0 ~ 2"
+        }
+      ],
+      "tier": "S",
+      "example": 0.7
+    },
+    {
+      "name": "max_tokens",
+      "type": "integer",
+      "in": "body",
+      "required": "optional",
+      "default": "模型上限",
+      "desc": "回答长度上限。",
+      "value_source": "none",
+      "tier": "S"
+    },
+    {
+      "name": "max_completion_tokens",
+      "type": "integer",
+      "in": "body",
+      "required": "optional",
+      "default": "—",
+      "desc": "回答长度上限（新版字段，与 max_tokens 二选一）。\n两个都传时以 max_completion_tokens 为准。",
+      "value_source": "none",
+      "tier": "S"
+    },
+    {
+      "name": "stream_options",
+      "type": "object",
+      "in": "body",
+      "required": "optional",
+      "default": "—",
+      "desc": "流式附加选项。\n常用 {include_usage:true}；OpenAI 系模型由平台自动开启，无需自己传。其它模型以实际返回为准。",
+      "value_source": "none",
+      "tier": "S"
+    },
+    {
+      "name": "top_p",
+      "type": "number",
+      "in": "body",
+      "required": "optional",
+      "default": "1",
+      "desc": "核采样，与 temperature 二选一。",
+      "value_source": "none",
+      "constraints": [
+        {
+          "kind": "min",
+          "value": 0,
+          "text": "0 ~ 1"
+        }
+      ],
+      "tier": "S"
+    },
+    {
+      "name": "stop",
+      "type": "any",
+      "in": "body",
+      "required": "optional",
+      "default": "—",
+      "desc": "命中即停止输出，字符串或数组。\n最多 4 个。",
+      "value_source": "none",
+      "tier": "S"
+    },
+    {
+      "name": "tools",
+      "type": "array",
+      "in": "body",
+      "required": "optional",
+      "default": "—",
+      "desc": "函数调用：把函数定义交给模型。\n写法 [{type:\"function\", function:{name, description, parameters}}]。",
+      "value_source": "none",
+      "tier": "S"
+    },
+    {
+      "name": "tool_choice",
+      "type": "any",
+      "in": "body",
+      "required": "optional",
+      "default": "auto",
+      "desc": "工具调用策略。\nauto 由模型决定 / none 禁止 / {type:\"function\",function:{name}} 强制指定。",
+      "value_source": "none",
+      "tier": "S"
+    },
+    {
+      "name": "response_format",
+      "type": "object",
+      "in": "body",
+      "required": "optional",
+      "default": "—",
+      "desc": "强制输出 JSON。\n常用 {type:\"json_object\"}。",
+      "value_source": "none",
+      "tier": "S"
+    },
+    {
+      "name": "seed",
+      "type": "integer",
+      "in": "body",
+      "required": "optional",
+      "default": "随机",
+      "desc": "固定随机种子便于复现。",
+      "value_source": "none",
+      "tier": "V",
+      "only_models": "部分模型"
+    }
+  ],
+  "response": {
+    "kind": "json",
+    "envelope": false,
+    "content_type": "text/event-stream",
+    "variants": [
+      {
+        "status": 200,
+        "label": "成功（JSON）",
+        "returns": [
+          {
+            "name": "id",
+            "type": "string",
+            "in": "body",
+            "required": "optional",
+            "default": "",
+            "desc": "本次回答编号。",
+            "value_source": "none",
+            "tier": "S"
+          },
+          {
+            "name": "choices[].message.content",
+            "type": "string",
+            "in": "body",
+            "required": "optional",
+            "default": "",
+            "desc": "回答正文（非流式）。",
+            "value_source": "none",
+            "tier": "S"
+          },
+          {
+            "name": "choices[].delta.content",
+            "type": "string",
+            "in": "body",
+            "required": "optional",
+            "default": "",
+            "desc": "增量正文（流式，每个事件一段）。",
+            "value_source": "none",
+            "tier": "S",
+            "sketch_skip": true
+          },
+          {
+            "name": "choices[].finish_reason",
+            "type": "string",
+            "in": "body",
+            "required": "optional",
+            "default": "",
+            "desc": "stop 正常 / length 截断 / tool_calls 调工具。",
+            "value_source": "none",
+            "tier": "S"
+          },
+          {
+            "name": "usage.prompt_tokens",
+            "type": "integer",
+            "in": "body",
+            "required": "optional",
+            "default": "",
+            "desc": "输入词块。",
+            "value_source": "none",
+            "tier": "S"
+          },
+          {
+            "name": "usage.completion_tokens",
+            "type": "integer",
+            "in": "body",
+            "required": "optional",
+            "default": "",
+            "desc": "输出词块。",
+            "value_source": "none",
+            "tier": "S"
+          },
+          {
+            "name": "usage.total_tokens",
+            "type": "integer",
+            "in": "body",
+            "required": "optional",
+            "default": "",
+            "desc": "总词块。",
+            "value_source": "none",
+            "tier": "S"
+          }
+        ],
+        "notes": [
+          "`stream: false`（默认）返回这个结构。"
+        ]
+      },
+      {
+        "status": 200,
+        "label": "流式（SSE）",
+        "content_type": "text/event-stream",
+        "returns": [
+          {
+            "name": "id",
+            "type": "string",
+            "in": "body",
+            "required": "optional",
+            "default": "",
+            "desc": "本次回答编号。",
+            "value_source": "none",
+            "tier": "S"
+          },
+          {
+            "name": "choices[].message.content",
+            "type": "string",
+            "in": "body",
+            "required": "optional",
+            "default": "",
+            "desc": "回答正文（非流式）。",
+            "value_source": "none",
+            "tier": "S"
+          },
+          {
+            "name": "choices[].delta.content",
+            "type": "string",
+            "in": "body",
+            "required": "optional",
+            "default": "",
+            "desc": "增量正文（流式，每个事件一段）。",
+            "value_source": "none",
+            "tier": "S",
+            "sketch_skip": true
+          },
+          {
+            "name": "choices[].finish_reason",
+            "type": "string",
+            "in": "body",
+            "required": "optional",
+            "default": "",
+            "desc": "stop 正常 / length 截断 / tool_calls 调工具。",
+            "value_source": "none",
+            "tier": "S"
+          },
+          {
+            "name": "usage.prompt_tokens",
+            "type": "integer",
+            "in": "body",
+            "required": "optional",
+            "default": "",
+            "desc": "输入词块。",
+            "value_source": "none",
+            "tier": "S"
+          },
+          {
+            "name": "usage.completion_tokens",
+            "type": "integer",
+            "in": "body",
+            "required": "optional",
+            "default": "",
+            "desc": "输出词块。",
+            "value_source": "none",
+            "tier": "S"
+          },
+          {
+            "name": "usage.total_tokens",
+            "type": "integer",
+            "in": "body",
+            "required": "optional",
+            "default": "",
+            "desc": "总词块。",
+            "value_source": "none",
+            "tier": "S"
+          }
+        ],
+        "raw": "data: {\"id\":\"chatcmpl-abc\",\"object\":\"chat.completion.chunk\",\"model\":\"gpt-4o\",\"choices\":[{\"index\":0,\"delta\":{\"role\":\"assistant\",\"content\":\"API\"}}]}\n\ndata: {\"id\":\"chatcmpl-abc\",\"object\":\"chat.completion.chunk\",\"model\":\"gpt-4o\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\" 网关\"}}]}\n\ndata: {\"id\":\"chatcmpl-abc\",\"object\":\"chat.completion.chunk\",\"model\":\"gpt-4o\",\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"stop\"}]}\n\ndata: {\"id\":\"chatcmpl-abc\",\"object\":\"chat.completion.chunk\",\"model\":\"gpt-4o\",\"choices\":[],\"usage\":{\"prompt_tokens\":12,\"completion_tokens\":8,\"total_tokens\":20}}\n\ndata: [DONE]",
+        "notes": [
+          "`stream: true` 返回事件流，最后一行 `data: [DONE]` 结束。",
+          "示例里的回答编号与词块数只是示意，实际值每次不同。"
+        ]
+      }
+    ]
+  },
+  "presets": [],
+  "errors": [
+    {
+      "status": 400,
+      "code": "invalid_param",
+      "desc": "参数不合法（字段缺失、取值越界、素材地址不可访问）。"
+    },
+    {
+      "status": 401,
+      "code": "invalid_api_key",
+      "desc": "KEY 无效、已过期或被禁用。"
+    },
+    {
+      "status": 402,
+      "code": "insufficient_balance",
+      "desc": "额度不足，请充值。"
+    },
+    {
+      "status": 403,
+      "code": "modality_not_allowed",
+      "desc": "该模态不在 KEY 的白名单里。"
+    },
+    {
+      "status": 403,
+      "code": "model_not_allowed",
+      "desc": "该 KEY 没有这个模型的权限。"
+    },
+    {
+      "status": 404,
+      "code": "model_not_found",
+      "desc": "模型不存在或已下线。"
+    },
+    {
+      "status": 413,
+      "code": "request_too_large",
+      "desc": "请求体超过上限。"
+    },
+    {
+      "status": 429,
+      "code": "rate_limited",
+      "desc": "请求过于频繁，稍后重试。"
+    },
+    {
+      "status": 500,
+      "code": "internal_error",
+      "desc": "服务端异常，本次不计费。"
+    },
+    {
+      "status": 503,
+      "code": "model_unavailable",
+      "desc": "该模型暂不可用，请更换模型或稍后重试。"
+    },
+    {
+      "status": 503,
+      "code": "service_unavailable",
+      "desc": "本次调用未能完成，未产生费用。"
+    }
+  ],
+  "models": [
+    {
+      "id": "deepseek-flash",
+      "name": "DeepSeek V4.1 Flash",
+      "vendor": "deepseek",
+      "vendor_name": "DeepSeek"
+    },
+    {
+      "id": "deepseek-v4-pro",
+      "name": "DeepSeek V4 Pro",
+      "vendor": "deepseek",
+      "vendor_name": "DeepSeek"
+    }
+  ],
+  "samples": {
+    "curl": "curl -X POST \\\n  \"https://lapi.example.com/v1/chat/completions\" \\\n  -H \"Authorization: Bearer $LD_API_KEY\" \\\n  -H \"Content-Type: application/json\" \\\n  -d '{\n  \"model\": \"gpt-4o\",\n  \"messages\": [\n    {\n      \"content\": \"你是一个耐心的编程助手\",\n      \"role\": \"system\"\n    },\n    {\n      \"content\": \"用一句话解释什么是 API 网关\",\n      \"role\": \"user\"\n    }\n  ],\n  \"stream\": false,\n  \"temperature\": 0.7\n}'",
+    "python": "import os\nimport requests\n\nBASE = \"https://lapi.example.com\"\nHEADERS = {\"Authorization\": \"Bearer \" + os.environ[\"LD_API_KEY\"]}\n\npayload = {\n    \"model\": \"gpt-4o\",\n    \"messages\": [\n        {\n            \"content\": \"你是一个耐心的编程助手\",\n            \"role\": \"system\",\n        },\n        {\n            \"content\": \"用一句话解释什么是 API 网关\",\n            \"role\": \"user\",\n        },\n    ],\n    \"stream\": False,\n    \"temperature\": 0.7,\n}\n\nr = requests.post(BASE + \"/v1/chat/completions\", headers=HEADERS, json=payload, timeout=(10, 300))\nr.raise_for_status()\nprint(r.json())\n",
+    "node": "const BASE = \"https://lapi.example.com\";\nconst KEY = process.env.LD_API_KEY;\n\nconst res = await fetch(BASE + \"/v1/chat/completions\", {\n  method: \"POST\",\n  headers: { Authorization: `Bearer ${KEY}`, \"Content-Type\": \"application/json\" },\n  body: JSON.stringify({\n  \"model\": \"gpt-4o\",\n  \"messages\": [\n    {\n      \"content\": \"你是一个耐心的编程助手\",\n      \"role\": \"system\"\n    },\n    {\n      \"content\": \"用一句话解释什么是 API 网关\",\n      \"role\": \"user\"\n    }\n  ],\n  \"stream\": false,\n  \"temperature\": 0.7\n}),\n});\nif (!res.ok) throw new Error(`${res.status} ${await res.text()}`);\nconsole.log(await res.json());\n",
+    "go": "package main\n\nimport (\n\t\"bytes\"\n\t\"fmt\"\n\t\"io\"\n\t\"net/http\"\n\t\"os\"\n\t\"strings\"\n)\n\nfunc main() {\n\tconst base = \"https://lapi.example.com\"\n\n\tbody := []byte(`{\n  \"model\": \"gpt-4o\",\n  \"messages\": [\n    {\n      \"content\": \"你是一个耐心的编程助手\",\n      \"role\": \"system\"\n    },\n    {\n      \"content\": \"用一句话解释什么是 API 网关\",\n      \"role\": \"user\"\n    }\n  ],\n  \"stream\": false,\n  \"temperature\": 0.7\n}`)\n\treq, err := http.NewRequest(\"POST\", base + \"/v1/chat/completions\", bytes.NewReader(body))\n\tif err != nil {\n\t\tpanic(err)\n\t}\n\treq.Header.Set(\"Authorization\", \"Bearer \"+os.Getenv(\"LD_API_KEY\"))\n\treq.Header.Set(\"Content-Type\", \"application/json\")\n\n\tres, err := http.DefaultClient.Do(req)\n\tif err != nil {\n\t\tpanic(err)\n\t}\n\tdefer res.Body.Close()\n\n\tif res.StatusCode != http.StatusOK {\n\t\tmsg, _ := io.ReadAll(res.Body)\n\t\tpanic(fmt.Sprintf(\"%d %s\", res.StatusCode, msg))\n\t}\n\tout, _ := io.ReadAll(res.Body)\n\tfmt.Println(strings.TrimSpace(string(out)))\n}\n"
+  },
+  "samples2": {
+    "curl": "curl -N -X POST \\\n  \"https://lapi.example.com/v1/chat/completions\" \\\n  -H \"Authorization: Bearer $LD_API_KEY\" \\\n  -H \"Content-Type: application/json\" \\\n  -d '{\n  \"model\": \"gpt-4o\",\n  \"messages\": [\n    {\n      \"role\": \"user\",\n      \"content\": \"写一句关于春天的诗\"\n    }\n  ],\n  \"stream\": true\n}'",
+    "python": "import os\nimport requests\n\nBASE = \"https://lapi.example.com\"\nHEADERS = {\"Authorization\": \"Bearer \" + os.environ[\"LD_API_KEY\"]}\n\npayload = {\n    \"model\": \"gpt-4o\",\n    \"messages\": [\n        {\n            \"role\": \"user\",\n            \"content\": \"写一句关于春天的诗\",\n        },\n    ],\n    \"stream\": True,\n}\n\nwith requests.post(BASE + \"/v1/chat/completions\", headers=HEADERS, json=payload, stream=True, timeout=(10, 300)) as r:\n    r.raise_for_status()\n    for line in r.iter_lines():\n        if line:\n            print(line.decode())\n",
+    "node": "const BASE = \"https://lapi.example.com\";\nconst KEY = process.env.LD_API_KEY;\n\nconst res = await fetch(BASE + \"/v1/chat/completions\", {\n  method: \"POST\",\n  headers: { Authorization: `Bearer ${KEY}`, \"Content-Type\": \"application/json\" },\n  body: JSON.stringify({\n  \"model\": \"gpt-4o\",\n  \"messages\": [\n    {\n      \"role\": \"user\",\n      \"content\": \"写一句关于春天的诗\"\n    }\n  ],\n  \"stream\": true\n}),\n});\nif (!res.ok) throw new Error(`${res.status} ${await res.text()}`);\n\nconst reader = res.body.getReader();\nconst dec = new TextDecoder();\nfor (;;) {\n  const { done, value } = await reader.read();\n  if (done) break;\n  process.stdout.write(dec.decode(value, { stream: true }));\n}\n",
+    "go": "package main\n\nimport (\n\t\"bytes\"\n\t\"fmt\"\n\t\"io\"\n\t\"net/http\"\n\t\"os\"\n\t\"strings\"\n)\n\nfunc main() {\n\tconst base = \"https://lapi.example.com\"\n\n\tbody := []byte(`{\n  \"model\": \"gpt-4o\",\n  \"messages\": [\n    {\n      \"role\": \"user\",\n      \"content\": \"写一句关于春天的诗\"\n    }\n  ],\n  \"stream\": true\n}`)\n\treq, err := http.NewRequest(\"POST\", base + \"/v1/chat/completions\", bytes.NewReader(body))\n\tif err != nil {\n\t\tpanic(err)\n\t}\n\treq.Header.Set(\"Authorization\", \"Bearer \"+os.Getenv(\"LD_API_KEY\"))\n\treq.Header.Set(\"Content-Type\", \"application/json\")\n\n\tres, err := http.DefaultClient.Do(req)\n\tif err != nil {\n\t\tpanic(err)\n\t}\n\tdefer res.Body.Close()\n\n\tif res.StatusCode != http.StatusOK {\n\t\tmsg, _ := io.ReadAll(res.Body)\n\t\tpanic(fmt.Sprintf(\"%d %s\", res.StatusCode, msg))\n\t}\n\t// 流式：逐行读到结束，不要一次性读完（会一直等到连接关闭）。\n\tbuf := make([]byte, 4096)\n\tfor {\n\t\tn, rerr := res.Body.Read(buf)\n\t\tif n > 0 {\n\t\t\tos.Stdout.Write(buf[:n])\n\t\t}\n\t\tif rerr != nil {\n\t\t\tbreak\n\t\t}\n\t}\n}\n"
+  },
+  "example_title2": "流式输出（打字机效果）",
+  "published": true
+}

@@ -1,0 +1,1734 @@
+/* ============================================================
+   AI 接入助手 · 对话工作台（/admin/agent）
+   ------------------------------------------------------------
+   与其它管理页的区别：这一页是一体的两栏（会话栏 + 对话区），
+   中间一条通高分割线，**没有页面标题栏**，也没有卡片式分区。
+
+   三条布局铁律：
+   1. 高度链必须一路 min-height:0 到滚动容器，否则滚动会落到整个文档上，
+      表现是"整页能滚、输入框跟着跑掉"。
+   2. 只有 .agent-thread 可以滚；会话栏与输入区各自固定。
+   3. 所有颜色只消费 tokens.css 的令牌（X7 会校验 var 是否有定义）。
+   ============================================================ */
+
+/* 页面级逃逸：吃掉 .a-content 的内边距，把视口交给本工作台。
+   :has() 限定只影响本页，不必给 AdminLayout 加路由分支。
+
+   关键：外壳必须被**视口高度**夹住。`.a-layout` 原本只有 min-height:100vh，
+   内容一变高它自己就长（实测 .agent-ws 被撑到 3700+px），于是 .agent-thread
+   永远不会产生滚动条，滚动落到 document 上 —— 表现就是"输出不贴底、
+   整页跟着滚"。这里给本页把 height 钉死，其它管理页仍是文档流滚动。 */
+.a-layout:has(.agent-ws) {
+  height: 100vh;
+  height: 100dvh; /* 移动端浏览器地址栏收放时 100vh 会偏大 */
+  min-height: 0;
+}
+
+.a-content:has(> .agent-ws) {
+  padding: 0;
+  min-height: 0;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+.agent-ws {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  position: relative;
+  background: var(--card);
+}
+
+/* 视觉上不显示、但读屏与路由需要（每页必须有 h1 是门禁项） */
+.a11y-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* ------------------------------ 会话栏 ------------------------------ */
+
+.agent-rail {
+  width: 260px;
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  background: var(--card-2);
+  /* 通高分割线：左右是一体的，不是两块卡片拼在一起 */
+  border-right: 1px solid var(--border);
+}
+
+.agent-rail__head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 12px 12px 8px;
+}
+.agent-new {
+  flex: 1;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  height: 38px;
+  padding: 0 12px;
+  border-radius: var(--r-sm);
+  border: 1px solid var(--border-h);
+  background: var(--card);
+  color: var(--t1);
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: 0.15s;
+}
+.agent-new:hover:not(:disabled) {
+  border-color: var(--primary);
+  color: var(--primary);
+}
+.agent-new:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+.agent-rail__close {
+  display: none;
+}
+
+.agent-rail__search {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0 12px 6px;
+  padding: 0 8px;
+  height: 32px;
+  border-radius: var(--r-sm);
+  background: var(--bg-2);
+  color: var(--t3);
+}
+.agent-rail__search input {
+  flex: 1;
+  min-width: 0;
+  border: 0;
+  background: transparent;
+  color: var(--t1);
+  font: inherit;
+  font-size: 12.5px;
+  outline: none;
+}
+
+.agent-rail__list {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 2px 8px 8px;
+}
+.agent-rail__hint {
+  padding: 12px 6px;
+  color: var(--t3);
+  font-size: 12.5px;
+  line-height: 1.8;
+}
+.agent-rail__groupname {
+  padding: 10px 6px 4px;
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  color: var(--t3);
+}
+.agent-rail__group ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.agent-rail__item {
+  position: relative;
+  display: flex;
+  align-items: center;
+  border-radius: var(--r-sm);
+}
+.agent-rail__item:hover {
+  background: var(--bg-2);
+}
+.agent-rail__item.is-active {
+  background: var(--primary-bg);
+}
+.agent-rail__btn {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  padding: 7px 10px;
+  border: 0;
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+  color: var(--t1);
+}
+.agent-rail__name {
+  font-size: 13px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.agent-rail__item.is-active .agent-rail__name {
+  color: var(--primary);
+  font-weight: 600;
+}
+.agent-rail__meta {
+  font-size: 11px;
+  color: var(--t3);
+}
+.agent-rail__acts {
+  position: absolute;
+  right: 4px;
+  top: 50%;
+  transform: translateY(-50%);
+  display: none;
+  gap: 2px;
+  padding-left: 8px;
+  background: linear-gradient(to right, transparent, var(--bg-2) 30%);
+  border-radius: var(--r-sm);
+}
+.agent-rail__item:hover .agent-rail__acts,
+.agent-rail__item:focus-within .agent-rail__acts {
+  display: flex;
+}
+.agent-rail__item.is-active .agent-rail__acts {
+  background: linear-gradient(to right, transparent, var(--primary-bg) 30%);
+}
+.agent-rail__act {
+  width: 24px;
+  height: 24px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--t3);
+  cursor: pointer;
+}
+.agent-rail__act:hover {
+  background: var(--card);
+  color: var(--t1);
+}
+.agent-rail__act--danger:hover {
+  color: var(--danger);
+}
+.agent-rail__rename {
+  flex: 1;
+  min-width: 0;
+  margin: 4px;
+  padding: 5px 8px;
+  border: 1px solid var(--primary);
+  border-radius: 8px;
+  background: var(--card);
+  color: var(--t1);
+  font: inherit;
+  font-size: 13px;
+  outline: none;
+}
+
+.agent-rail__foot {
+  flex-shrink: 0;
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 2px 8px;
+  align-items: center;
+  margin: 0;
+  padding: 10px 14px 12px;
+  border: 0;
+  border-top: 1px solid var(--border);
+  background: transparent;
+  color: var(--t2);
+  font-size: 12px;
+  text-align: left;
+  cursor: pointer;
+}
+.agent-rail__foot:hover {
+  background: var(--bg-2);
+}
+.agent-rail__foot-l {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--t3);
+}
+.agent-rail__foot-r {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  color: var(--t1);
+}
+.agent-rail__bar {
+  grid-column: 1 / -1;
+  height: 3px;
+  border-radius: 999px;
+  background: var(--bg-2);
+  overflow: hidden;
+}
+.agent-rail__bar i {
+  display: block;
+  height: 100%;
+  background: var(--primary);
+}
+.agent-rail__bar i[data-warn="1"] {
+  background: var(--danger);
+}
+
+/* ------------------------------ 主区 ------------------------------ */
+
+.agent-main {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.agent-mobilebar {
+  display: none;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+  height: 44px;
+  padding: 0 10px;
+  border-bottom: 1px solid var(--border);
+}
+.agent-mobilebar__title {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--t1);
+}
+.agent-mobilebar-mask {
+  display: none;
+}
+
+/* 阻断态（没有可用对话模型 / 总闸关闭）必须留在明面上：
+   藏进设置弹窗等于让人对着一个点不动的输入框猜原因。 */
+.agent-banner {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+  margin: 10px 24px 0;
+  padding: 8px 12px;
+  border-radius: var(--r-sm);
+  background: var(--warning-bg);
+  color: var(--warning);
+  font-size: 12.5px;
+}
+.agent-banner span {
+  flex: 1;
+  min-width: 0;
+}
+
+/* ------------------------------ 对话区 ------------------------------ */
+
+.agent-thread-wrap {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  display: flex;
+}
+.agent-thread {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+.agent-thread__inner {
+  max-width: 760px;
+  margin: 0 auto;
+  padding: 24px 24px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 28px;
+}
+/* 只有空态时垂直居中：一屏空白里贴着顶部会显得"内容没加载出来" */
+.agent-thread__inner:has(> .agent-empty) {
+  min-height: 100%;
+  justify-content: center;
+}
+.agent-thread__loading {
+  padding: 40px 0;
+  text-align: center;
+  color: var(--t3);
+  font-size: 13px;
+}
+
+.agent-turn {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.agent-turn__user {
+  align-self: flex-end;
+  max-width: 78%;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 4px;
+}
+.agent-bubble {
+  padding: 10px 14px;
+  border-radius: 16px 16px 4px 16px;
+  background: var(--bg-2);
+  color: var(--t1);
+  font-size: 14px;
+  line-height: 1.7;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.agent-turn__time {
+  font-size: 11px;
+  color: var(--t3);
+}
+.agent-turn__body {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  font-size: 14px;
+  line-height: 1.75;
+  color: var(--t1);
+  min-width: 0;
+}
+.agent-turn__meta {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  font-size: 11.5px;
+  color: var(--t3);
+  font-variant-numeric: tabular-nums;
+}
+.agent-say {
+  word-break: break-word;
+}
+.agent-say--muted {
+  color: var(--t3);
+  font-size: 13px;
+}
+.agent-answer {
+  word-break: break-word;
+}
+.agent-caret {
+  display: inline-block;
+  width: 2px;
+  height: 15px;
+  margin-left: 2px;
+  vertical-align: -2px;
+  background: var(--primary);
+  animation: agent-blink 1s steps(1) infinite;
+}
+@keyframes agent-blink {
+  50% {
+    opacity: 0;
+  }
+}
+
+/* 流式内容过长时，底部提示可回看 */
+.agent-jump {
+  position: absolute;
+  left: 50%;
+  bottom: 12px;
+  transform: translateX(-50%);
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 30px;
+  padding: 0 12px;
+  border-radius: 999px;
+  border: 1px solid var(--border-h);
+  background: var(--card);
+  color: var(--t2);
+  font-size: 12px;
+  box-shadow: var(--sh-md);
+  cursor: pointer;
+}
+
+/* ------------------------------ Markdown ------------------------------ */
+
+.agent-md > *:first-child {
+  margin-top: 0;
+}
+.agent-md > *:last-child {
+  margin-bottom: 0;
+}
+.agent-md__p {
+  margin: 0 0 10px;
+}
+.agent-md__h {
+  margin: 14px 0 8px;
+  font-size: 15px;
+  color: var(--t1);
+}
+.agent-md__list {
+  margin: 0 0 10px;
+  padding-left: 20px;
+  /* Tailwind preflight 把 ul/ol 的 list-style 清零了：不显式声明就会出现
+     "缩进有了、项目符号没了"，一列阶梯式的裸文本。 */
+  list-style-position: outside;
+}
+ul.agent-md__list {
+  list-style-type: disc;
+}
+ol.agent-md__list {
+  list-style-type: decimal;
+}
+.agent-md__list li::marker {
+  color: var(--t3);
+}
+.agent-md__list li {
+  margin: 2px 0;
+}
+.agent-md__list li[data-depth="1"] {
+  margin-left: 14px;
+}
+.agent-md__list li[data-depth="2"] {
+  margin-left: 28px;
+}
+.agent-md__list li[data-depth="3"] {
+  margin-left: 42px;
+}
+.agent-md__code {
+  font-family: var(--mono);
+  font-size: 12.5px;
+  padding: 1px 5px;
+  border-radius: 5px;
+  background: var(--bg-2);
+  word-break: break-word;
+}
+.agent-md__pre {
+  position: relative;
+  margin: 0 0 10px;
+  padding: 10px 12px;
+  border-radius: var(--r-sm);
+  background: var(--bg-2);
+  overflow-x: auto;
+}
+.agent-md__pre code {
+  font-family: var(--mono);
+  font-size: 12.5px;
+  white-space: pre;
+  color: var(--t1);
+}
+.agent-md__lang {
+  position: absolute;
+  top: 6px;
+  right: 10px;
+  font-size: 10.5px;
+  color: var(--t3);
+}
+.agent-md__tablewrap {
+  margin: 0 0 10px;
+  overflow-x: auto;
+}
+.agent-md__table {
+  border-collapse: collapse;
+  font-size: 12.5px;
+}
+.agent-md__table th,
+.agent-md__table td {
+  border: 1px solid var(--border);
+  padding: 6px 10px;
+  text-align: left;
+  white-space: nowrap;
+}
+.agent-md__table th {
+  background: var(--card-2);
+  font-weight: 600;
+}
+.agent-md__quote {
+  margin: 0 0 10px;
+  padding-left: 10px;
+  border-left: 2px solid var(--border-h);
+  color: var(--t2);
+}
+.agent-md__hr {
+  margin: 12px 0;
+  border: 0;
+  border-top: 1px solid var(--border);
+}
+.agent-md a {
+  color: var(--primary);
+  text-decoration: none;
+}
+.agent-md a:hover {
+  text-decoration: underline;
+}
+
+/* ------------------------------ 思考块 ------------------------------ */
+
+/* 思考正文展开后的可视高度上限：长思考只给约 10 行，超过裁切 + 「展开全部」，
+   否则一段几万字的推理会把整段答复顶到几屏之外。 */
+.agent-think {
+  --agent-clamp-h: 200px;
+  border-left: 2px solid var(--border-h);
+  padding-left: 10px;
+}
+.agent-think__head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  padding: 2px 0;
+  border: 0;
+  background: transparent;
+  color: var(--t3);
+  font-size: 12.5px;
+  text-align: left;
+  cursor: pointer;
+}
+.agent-think__title.is-live {
+  color: var(--primary);
+}
+.agent-think__preview {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  opacity: 0.85;
+}
+.agent-think__wrap {
+  position: relative;
+}
+.agent-think__wrap[data-clamp="on"] .agent-think__body {
+  max-height: var(--agent-clamp-h);
+  overflow: hidden;
+}
+/* 底部渐隐，提示"下面还有"；不遮住「展开全部」按钮（按钮在 wrap 之外）。 */
+.agent-think__wrap[data-clamp="on"]::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 40px;
+  background: linear-gradient(transparent, var(--card));
+  pointer-events: none;
+}
+.agent-think__more {
+  display: inline-flex;
+  align-items: center;
+  margin-top: 4px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--primary);
+  font-size: 12px;
+  cursor: pointer;
+}
+.agent-think__body {
+  margin-top: 6px;
+  color: var(--t2);
+  font-size: 13px;
+  line-height: 1.7;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+/* ------------------------------ 工具过程 ------------------------------ */
+
+.agent-tools {
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  background: var(--card-2);
+  overflow: hidden;
+}
+.agent-tools__head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 9px 12px;
+  border: 0;
+  background: transparent;
+  color: var(--t2);
+  font-size: 12.5px;
+  text-align: left;
+  cursor: pointer;
+}
+.agent-tools__head:hover {
+  background: var(--bg-2);
+}
+.agent-tools__title {
+  flex-shrink: 0;
+}
+.agent-tools__ok {
+  color: var(--success);
+}
+.agent-tools__bad {
+  color: var(--danger);
+}
+.agent-tools__live {
+  color: var(--primary);
+}
+.agent-tools__summary {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--t3);
+}
+.agent-tools__list {
+  list-style: none;
+  margin: 0;
+  padding: 0 8px 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  /* 一轮最多 40 个工具调用：不限高时展开会把整段对话顶走。
+     内部滚动，滚到底不会把页面一起带走（overscroll-behavior）。 */
+  max-height: 320px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+.agent-tool {
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  background: var(--card);
+}
+.agent-tool[data-state="run"] {
+  border-color: var(--primary);
+}
+.agent-tool[data-state="bad"] {
+  border-color: var(--danger);
+}
+.agent-tool__row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 8px 10px;
+  border: 0;
+  background: transparent;
+  color: var(--t1);
+  font-size: 12.5px;
+  text-align: left;
+  cursor: pointer;
+}
+.agent-tool__icon {
+  display: inline-flex;
+  color: var(--t3);
+}
+.agent-tool__name {
+  flex-shrink: 0;
+  font-weight: 600;
+}
+.agent-tool__args {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--t3);
+}
+.agent-tool__state {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+  color: var(--success);
+}
+.agent-tool[data-state="bad"] .agent-tool__state {
+  color: var(--danger);
+}
+.agent-tool[data-state="run"] .agent-tool__state {
+  color: var(--primary);
+}
+.agent-tool__ms {
+  color: var(--t3);
+  font-variant-numeric: tabular-nums;
+}
+.agent-tool__result {
+  padding: 0 10px 8px 31px;
+  font-size: 12px;
+  color: var(--t2);
+  word-break: break-word;
+}
+.agent-tool__result[data-tone="ok"] {
+  color: var(--success);
+}
+.agent-tool__result[data-tone="bad"] {
+  color: var(--danger);
+}
+.agent-tool__detail {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px 10px;
+  border-top: 1px dashed var(--border);
+}
+.agent-tool__kv {
+  display: flex;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--t2);
+}
+.agent-tool__kv > span {
+  flex-shrink: 0;
+  width: 26px;
+  color: var(--t3);
+}
+.agent-tool__kv code {
+  flex: 1;
+  min-width: 0;
+  padding: 2px 6px;
+  border-radius: 6px;
+  background: var(--bg-2);
+  font-family: var(--mono);
+  font-size: 11.5px;
+  word-break: break-all;
+}
+
+/* ------------------------------ 提案卡 ------------------------------ */
+
+.agent-prop {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px 14px;
+  border: 1px solid var(--border-h);
+  border-radius: var(--r-md);
+  background: var(--card);
+}
+.agent-prop__head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.agent-prop__title {
+  flex: 1;
+  min-width: 0;
+  font-weight: 600;
+  font-size: 13.5px;
+}
+.agent-prop__id {
+  color: var(--t3);
+  font-size: 11.5px;
+}
+.agent-prop__stats {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+  font-size: 12.5px;
+  color: var(--t2);
+}
+.agent-prop__diff {
+  padding-top: 8px;
+  border-top: 1px dashed var(--border);
+}
+.agent-prop__diff ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.agent-prop__muted {
+  color: var(--t3);
+  font-size: 12px;
+}
+/* L3 结论（kind=unsupported）：原因清单要能一眼扫完，不要挤成一段文字 */
+.agent-prop__unsup {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.agent-unsup__list {
+  margin: 0;
+  padding-left: 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: 12.5px;
+  color: var(--t2);
+}
+.agent-prop__acts {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.agent-prop__hint {
+  font-size: 12.5px;
+  color: var(--warning);
+}
+.agent-diffrow {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  flex-wrap: wrap;
+  font-size: 12.5px;
+  color: var(--t1);
+}
+.agent-diffrow__op {
+  flex-shrink: 0;
+  padding: 0 6px;
+  border-radius: 999px;
+  font-size: 11px;
+  background: var(--info-bg);
+  color: var(--t2);
+}
+.agent-diffrow__op[data-op="create"] {
+  background: var(--success-bg);
+  color: var(--success);
+}
+.agent-diffrow__op[data-op="disable"] {
+  background: var(--danger-bg);
+  color: var(--danger);
+}
+.agent-diffrow__op[data-op="update"],
+.agent-diffrow__op[data-op="replace"] {
+  background: var(--warning-bg);
+  color: var(--warning);
+}
+.agent-diffrow__entity {
+  color: var(--t2);
+}
+.agent-diffrow__key {
+  font-family: var(--mono);
+  font-size: 11.5px;
+  color: var(--t2);
+}
+.agent-diffrow__more summary {
+  cursor: pointer;
+  color: var(--primary);
+  font-size: 12px;
+}
+.agent-diffrow__more pre {
+  margin: 6px 0 0;
+  padding: 8px 10px;
+  border-radius: var(--r-sm);
+  background: var(--bg-2);
+  font-family: var(--mono);
+  font-size: 11.5px;
+  max-height: 220px;
+  overflow: auto;
+}
+
+/* ------------------------------ 输入区 ------------------------------ */
+
+.agent-composer-wrap {
+  position: relative;
+  flex-shrink: 0;
+  padding: 6px 24px 10px;
+}
+/* 上沿渐隐：滚动内容从输入框"底下"淡出，而不是硬切一条线 */
+.agent-composer-wrap::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: -22px;
+  height: 22px;
+  background: linear-gradient(to bottom, transparent, var(--card));
+  pointer-events: none;
+}
+.agent-composer {
+  max-width: 760px;
+  margin: 0 auto;
+  padding: 10px 12px 8px;
+  border: 1px solid var(--border-h);
+  border-radius: 16px;
+  background: var(--card);
+  box-shadow: var(--sh-xs);
+}
+/* 输入区**没有焦点视觉**（产品决定）：聚焦前后外框完全一致，只剩光标。
+   内层 textarea 必须显式压掉全局 `textarea:focus`（components.css）的
+   3px 光环与 10px 圆角 —— 只写 `.agent-composer__input`（0,1,0）压不住
+   `textarea:focus`（0,1,1），必须用 `:focus` 版本（0,2,0）。 */
+.agent-composer__input {
+  width: 100%;
+  min-height: 24px;
+  max-height: 180px;
+  padding: 2px 2px 6px;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+  color: var(--t1);
+  font-family: inherit;
+  font-size: 14px;
+  line-height: 1.65;
+  resize: none;
+  outline: none;
+  overflow-y: auto;
+}
+.agent-composer__input:focus,
+.agent-composer__input:focus-visible {
+  outline: none;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+}
+.agent-composer__input::placeholder {
+  color: var(--t3);
+}
+.agent-bar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.agent-bar__spacer {
+  flex: 1;
+}
+/* 上下文占用：等宽小字，不抢模型名与按钮的视觉权重 */
+.agent-ctxmeter {
+  font-size: 11.5px;
+  color: var(--t3);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  margin-right: 4px;
+}
+.agent-toolbtn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 30px;
+  padding: 0 10px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--card);
+  color: var(--t2);
+  font-size: 12.5px;
+  cursor: pointer;
+  transition: 0.15s;
+}
+.agent-toolbtn:hover {
+  border-color: var(--border-h);
+  color: var(--t1);
+}
+.agent-toolbtn--model {
+  max-width: 240px;
+}
+.agent-toolbtn--model span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.agent-toolbtn__badge {
+  padding: 0 5px;
+  border-radius: 999px;
+  background: var(--primary-bg);
+  color: var(--primary);
+  font-size: 10.5px;
+}
+.agent-iconbtn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--t3);
+  cursor: pointer;
+}
+.agent-iconbtn:hover {
+  background: var(--bg-2);
+  color: var(--t1);
+}
+.agent-iconbtn--sm {
+  width: 26px;
+  height: 26px;
+}
+.agent-send {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border: 0;
+  border-radius: 999px;
+  background: var(--primary);
+  color: #fff;
+  cursor: pointer;
+  transition: 0.15s;
+}
+.agent-send:hover:not(:disabled) {
+  background: var(--primary-h);
+}
+.agent-send:disabled {
+  background: var(--border-h);
+  color: var(--t3);
+  cursor: not-allowed;
+}
+.agent-send--stop {
+  background: var(--t1);
+  color: var(--card);
+}
+.agent-composer__foot {
+  max-width: 760px;
+  margin: 6px auto 0;
+  text-align: center;
+  font-size: 11px;
+  color: var(--t3);
+}
+.agent-quotes {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 0 2px 8px;
+}
+.agent-quote {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  max-width: 220px;
+  padding: 3px 6px 3px 8px;
+  border-radius: 999px;
+  background: var(--primary-bg);
+  color: var(--primary);
+  font-size: 11.5px;
+}
+.agent-quote > span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.agent-quote button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--primary);
+  cursor: pointer;
+}
+
+/* ------------------------------ 空态 ------------------------------ */
+
+.agent-empty {
+  padding: 32px 0 12px;
+}
+.agent-empty__hero {
+  text-align: center;
+}
+.agent-empty__mark {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 44px;
+  height: 44px;
+  border-radius: 14px;
+  background-image: var(--grad);
+  color: #fff;
+  box-shadow: var(--sh-glow);
+}
+.agent-empty__hero h2 {
+  margin: 12px 0 6px;
+  font-size: 19px;
+  color: var(--t1);
+}
+.agent-empty__hero p {
+  margin: 0 auto;
+  max-width: 520px;
+  color: var(--t2);
+  font-size: 13px;
+  line-height: 1.75;
+}
+.agent-empty__grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  margin-top: 24px;
+}
+.agent-guide {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  background: var(--card-2);
+  text-align: left;
+  cursor: pointer;
+  transition: 0.15s;
+}
+.agent-guide:hover {
+  border-color: var(--primary);
+  background: var(--card);
+}
+.agent-guide__icon {
+  color: var(--primary);
+}
+.agent-guide__title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--t1);
+}
+.agent-guide__desc {
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--t3);
+}
+
+/* ------------------------------ 弹窗内容 ------------------------------ */
+
+.agent-dlg {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.agent-dlg__lead {
+  margin: 0;
+  color: var(--t3);
+  font-size: 12.5px;
+  line-height: 1.7;
+}
+.agent-dlg__row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12.5px;
+  color: var(--t2);
+}
+.agent-dlg__row b {
+  color: var(--t1);
+}
+.agent-dlg__empty {
+  padding: 12px;
+  border: 1px dashed var(--border-h);
+  border-radius: var(--r-sm);
+  color: var(--t3);
+  font-size: 12.5px;
+}
+
+.agent-picklist {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-height: 320px;
+  overflow-y: auto;
+}
+.agent-pick {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 9px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  background: var(--card);
+  color: var(--t1);
+  text-align: left;
+  cursor: pointer;
+}
+.agent-pick:hover {
+  border-color: var(--border-h);
+}
+.agent-pick.is-on {
+  border-color: var(--primary);
+  background: var(--primary-bg);
+}
+.agent-pick__main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.agent-pick__name {
+  font-size: 13px;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.agent-pick__sub {
+  font-size: 11.5px;
+  color: var(--t3);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.agent-seg {
+  display: inline-flex;
+  gap: 4px;
+  padding: 3px;
+  border-radius: 999px;
+  background: var(--bg-2);
+  align-self: flex-start;
+}
+.agent-seg button {
+  height: 26px;
+  padding: 0 12px;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--t2);
+  font-size: 12.5px;
+  cursor: pointer;
+}
+.agent-seg button.is-on {
+  background: var(--card);
+  color: var(--t1);
+  font-weight: 600;
+  box-shadow: var(--sh-xs);
+}
+
+.agent-docs__list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-height: 240px;
+  overflow-y: auto;
+}
+.agent-docs__item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  flex-wrap: wrap;
+}
+.agent-docs__item.is-on {
+  border-color: var(--primary);
+  background: var(--primary-bg);
+}
+.agent-docs__check {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  flex-shrink: 0;
+  border: 1px solid var(--border-h);
+  border-radius: 5px;
+  background: var(--card);
+  color: #fff;
+  cursor: pointer;
+}
+.agent-docs__item.is-on .agent-docs__check {
+  background: var(--primary);
+  border-color: var(--primary);
+}
+.agent-docs__main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  border: 0;
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+  color: var(--t1);
+}
+.agent-docs__title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12.5px;
+}
+.agent-docs__meta {
+  flex-shrink: 0;
+  font-size: 11.5px;
+  color: var(--t3);
+}
+.agent-docs__preview {
+  flex-basis: 100%;
+  padding: 8px 10px;
+  border-radius: var(--r-sm);
+  background: var(--bg-2);
+  font-size: 12px;
+  color: var(--t2);
+}
+.agent-docs__preview pre {
+  margin: 6px 0 0;
+  max-height: 200px;
+  overflow: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-family: var(--mono);
+  font-size: 11.5px;
+}
+.agent-docs__toc {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.agent-docs__toc span {
+  padding: 0 6px;
+  border-radius: 999px;
+  background: var(--card);
+  font-size: 11px;
+  color: var(--t2);
+}
+.agent-docs__more {
+  margin-top: 6px;
+  color: var(--t3);
+  font-size: 11px;
+}
+.agent-docs__add {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding-top: 6px;
+  border-top: 1px dashed var(--border);
+}
+.agent-docs__actions {
+  display: flex;
+  justify-content: flex-end;
+}
+
+/* ------------------------------ 通用零件 ------------------------------ */
+
+.agent-tag {
+  display: inline-flex;
+  align-items: center;
+  height: 20px;
+  padding: 0 7px;
+  border-radius: 999px;
+  font-size: 11px;
+  background: var(--info-bg);
+  color: var(--t2);
+}
+.agent-tag--ok {
+  background: var(--success-bg);
+  color: var(--success);
+}
+.agent-tag--bad {
+  background: var(--danger-bg);
+  color: var(--danger);
+}
+.agent-tag--live {
+  background: var(--primary-bg);
+  color: var(--primary);
+}
+.agent-tag--muted {
+  background: var(--bg-2);
+  color: var(--t3);
+}
+
+.agent-alert {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 10px;
+  border-radius: var(--r-sm);
+  font-size: 12.5px;
+  line-height: 1.6;
+}
+/* 文案占满剩余宽度，动作靠右：长错误信息不会把按钮挤成两行。 */
+.agent-alert__text {
+  flex: 1;
+  min-width: 0;
+  word-break: break-word;
+}
+.agent-alert__acts {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  flex-shrink: 0;
+  margin-left: auto;
+}
+.agent-alert--bad {
+  background: var(--danger-bg);
+  color: var(--danger);
+}
+.agent-alert--warn {
+  background: var(--warning-bg);
+  color: var(--warning);
+}
+.agent-alert--ok {
+  background: var(--success-bg);
+  color: var(--success);
+}
+
+.agent-linkbtn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--primary);
+  font-size: 12px;
+  cursor: pointer;
+}
+.agent-linkbtn:hover {
+  text-decoration: underline;
+}
+.agent-dot::before {
+  content: "·";
+  margin-right: 8px;
+  color: var(--t3);
+}
+.agent-fold {
+  margin-left: auto;
+  transition: transform 0.18s;
+  color: var(--t3);
+}
+.agent-fold.is-open {
+  transform: rotate(180deg);
+}
+.agent-spin {
+  display: inline-block;
+  width: 11px;
+  height: 11px;
+  border: 1.5px solid var(--primary-bg);
+  border-top-color: var(--primary);
+  border-radius: 50%;
+  animation: agent-spin 0.8s linear infinite;
+}
+@keyframes agent-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* ------------------------------ 响应式 ------------------------------ */
+
+@media (max-width: 1179px) {
+  .agent-rail {
+    width: 232px;
+  }
+}
+
+@media (max-width: 899px) {
+  .agent-rail {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    left: 0;
+    z-index: 60;
+    width: 236px;
+    transform: translateX(-100%);
+    transition: transform 0.2s;
+    box-shadow: var(--sh-md);
+  }
+  .agent-ws[data-rail="open"] .agent-rail {
+    transform: none;
+  }
+  .agent-rail__close {
+    display: inline-flex;
+  }
+  .agent-ws[data-rail="open"] .agent-mobilebar-mask {
+    display: block;
+    position: absolute;
+    inset: 0;
+    z-index: 55;
+    background: rgba(15, 18, 28, 0.42);
+  }
+  .agent-mobilebar {
+    display: flex;
+  }
+  .agent-thread__inner {
+    padding: 16px 16px 8px;
+  }
+  .agent-composer-wrap {
+    padding: 6px 14px 10px;
+  }
+  .agent-banner {
+    margin: 8px 14px 0;
+  }
+  .agent-empty__grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .agent-turn__user {
+    max-width: 90%;
+  }
+  .agent-composer__foot {
+    display: none;
+  }
+}
+
+/* iOS 聚焦时 <16px 会自动放大页面，聊天输入框被放大一次就走丢了 */
+@media (max-width: 767px) {
+  .agent-composer__input {
+    font-size: 16px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .agent-spin,
+  .agent-caret {
+    animation: none;
+  }
+  .agent-fold,
+  .agent-rail {
+    transition: none;
+  }
+}
+
+/* ── 提问卡（ask_user） ─────────────────────────────────────────
+   一张卡只有一个交互目标：把问题答出去。所以选项做成整块可点，
+   而不是"复选框 + 提交"两步 —— 60 秒的窗口里，少一次点击就少一次超时。 */
+.agent-ask {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--primary);
+  border-radius: var(--r-sm);
+  background: var(--card);
+}
+/* 终态统一降饱和：它已经不能再操作了，视觉上也不该抢注意力。 */
+.agent-ask[data-state="answered"] {
+  border-left-color: var(--success);
+}
+.agent-ask[data-state="skipped"],
+.agent-ask[data-state="timeout"],
+.agent-ask[data-state="expired"],
+.agent-ask[data-state="aborted"],
+.agent-ask[data-state="denied"],
+.agent-ask[data-state="no_time"] {
+  border-left-color: var(--border-h);
+  background: var(--bg-2);
+}
+
+.agent-ask__head {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  color: var(--t1);
+  font-size: 13px;
+  line-height: 1.6;
+}
+.agent-ask__q {
+  flex: 1;
+  min-width: 0;
+  font-weight: 600;
+  word-break: break-word;
+}
+.agent-ask__state {
+  flex-shrink: 0;
+  color: var(--t3);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+.agent-ask__why {
+  color: var(--t3);
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.agent-ask__opts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.agent-ask__opt {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 120px;
+  padding: 8px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  background: var(--card);
+  color: var(--t1);
+  text-align: left;
+  cursor: pointer;
+}
+.agent-ask__opt:hover:not(:disabled) {
+  border-color: var(--border-h);
+}
+.agent-ask__opt.is-on {
+  border-color: var(--primary);
+  background: var(--primary-bg);
+}
+.agent-ask__opt:disabled {
+  cursor: default;
+  opacity: 0.7;
+}
+.agent-ask__label {
+  font-size: 13px;
+  font-weight: 600;
+}
+.agent-ask__detail {
+  color: var(--t3);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+/* 输入框沿用全局 input 基础样式（高度/边框/圆角/底色/聚焦环），
+   这里不再重复声明 —— 重复一份就会在改设计令牌时漂成第二个真相源。 */
+.agent-ask__free {
+  width: 100%;
+}
+
+.agent-ask__acts {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.agent-ask__err {
+  color: var(--danger);
+  font-size: 12px;
+}
+.agent-ask__ans {
+  color: var(--t2);
+  font-size: 12.5px;
+  line-height: 1.6;
+  word-break: break-word;
+}
+
+/* ============================================================
+   助手弹窗形态（「新建适配器」入口）
+   ------------------------------------------------------------
+   与页面形态共用同一套 `.agent-ws`，区别只有高度链的**来源**：
+   页面版靠 `.a-content:has(> .agent-ws)` 逃逸出视口高度；弹窗版由 `.dialog` 定高，
+   所以 `.dl-body` 必须 `overflow:hidden`（它默认 `overflow-y:auto`，一滚就会把
+   rail 的 sticky 与 thread 的贴底一起带偏）。
+   类名用 `.dialog.agent-dialog`（0,2,0）压过 `.dialog--xl` 的 760px —— 工作台要
+   rail 240 + 对话区至少 500，760 会挤成一条缝。
+   ============================================================ */
+.dialog.agent-dialog {
+  width: min(1000px, 94vw);
+  height: min(88vh, 760px);
+  /* 覆盖 .dialog 的 max-height: min(86vh,720px)，否则 height 会被它截断 */
+  max-height: min(88vh, 760px);
+}
+.dialog.agent-dialog .dl-body {
+  padding: 0;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+.dialog.agent-dialog .agent-ws {
+  flex: 1 1 auto;
+  min-height: 0;
+}
+/* 弹窗里 260px 的 rail 会把对话区压到 700 以下，232 是这一档的合适值 */
+.dialog.agent-dialog .agent-rail {
+  width: 232px;
+}
+/* ≤767px 时 .dialog 已变成底部 Sheet（宽度 100vw），这里只补高度：
+   工作台是纯滚动布局，92vh 的 Sheet 会露一条背景，直接给满。 */
+@media (max-width: 767px) {
+  .dialog.agent-dialog {
+    height: 92dvh;
+    max-height: 92dvh;
+  }
+}

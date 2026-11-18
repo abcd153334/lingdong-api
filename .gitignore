@@ -1,0 +1,92 @@
+# 本地开发环境（不参与交付）
+# 后端运行期密钥与本地数据，禁止提交
+backend/.env
+backend/data/
+.dev/
+
+# 说明：web/dist 属交付产物，需提交；deploy/.env 由 deploy/.env.example 复制而来，同样禁止提交
+deploy/.env
+
+# ---- 交付卫生 ----
+# 下面这些是构建产物、二进制、归档与第三方源码，**不属于源码交付物**：
+# 它们让仓库膨胀到 700MB+，并且会把生产密钥/历史口令带进每一次 clone。
+# 已存在的文件需人工移到仓库外归档目录（不做自动删除）。
+*.zip
+*.exe
+*.bak
+lingdong-api.zip
+
+# 审计与测试产物（含真实响应报文与账号口令，绝不入库）
+.audit/
+test-results/
+outputs/
+web/test-results/
+web/e2e/artifacts/
+
+# 第三方与历史源码（new-api 为 AGPLv3，整体分发会带来许可义务；历史目录含明文口令）
+new-api/
+源代码*/
+
+# 工具链
+lab/node_modules/
+node_modules/
+
+# 一次性调试产物（跑测试/脚本时留在工作区的临时物，永远不该入库）
+*.log
+.tmp-*
+backend/_tmp_*
+backend/docdocs-backup/
+
+# 部署/开发产生的大目录（git init 前必须忽略，否则仓库膨胀到 700MB+）
+node_modules/
+web/node_modules/
+new-api/
+源代码1.3.7/
+.snapshots/
+deploy/backups/
+
+# 实验/产物/打包件（不属于源码，入库会让仓库膨胀且污染 diff）
+lab/
+outputs/
+*.zip
+
+# 部署状态记录（由 tag-release.sh 写入，属于"这台机器跑到哪一版"，不属于源码）
+deploy/.release
+deploy/.release.history
+
+# ---- 开发过程产物：保留在本地工作区，但不属于产品源码 ----
+# 本仓对外公开，这些目录含内部分析记录、基础设施细节与源码历史副本，
+# 放在公开历史里既暴露内部信息，也让 clone 体积与噪音无谓变大。
+# 注意是「不跟踪」，文件仍在本地，随时可重新纳入（git add -f）。
+.trae/
+.workbuddy/
+data/backup/
+evidence/
+__pycache__/
+*.pyc
+
+# ---- 公开仓白名单（2026-11-18 铁律，详见 docs/工程铁律-项目长期约定.md）----
+# 本仓只放系统代码。下面这些是本地资产：文件仍在磁盘上，只是不进仓库。
+# 判断标准不是「重不重要」，而是「删掉它 go build / go test / compose 会不会红」。
+# 提交前跑 `bash scripts/check-repo-hygiene.sh`，它是唯一判据。
+#
+# 注意：.gitignore **不支持行尾注释**。写成 `docs/  # 说明` 时整行会被当成一条
+# 匹配不到的规则，表现为「明明加了忽略，文件还是全变成未跟踪」。
+# 注释只能独占一行。
+docs/
+API文档/
+prototype/
+xunhupay-master/
+deploy/edge/
+testdata/*.tmp
+
+# 开发环境与运维脚本（只对本机有意义，含本地库口令/真实渠道 KEY 的取用方式）
+scripts/dev.ps1
+scripts/dev-db.ps1
+scripts/dev-env.ps1
+scripts/dev-up.ps1
+scripts/setup-pg-user.ps1
+scripts/live-rebuild.py
+scripts/reset-doc-groups.ps1
+scripts/duomi-nano-protocol.sql
+scripts/gen-docs-fixtures.mjs

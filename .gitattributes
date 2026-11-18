@@ -1,0 +1,34 @@
+# 行尾与二进制规范（建仓即定，避免日后全仓“换行重写”）
+#
+# 为什么必须有这一份：Windows 上 git 默认 core.autocrlf=true，检出时会把
+# LF 转成 CRLF。而 deploy/scripts/*.sh 是要在 Linux 上执行的 —— CRLF 会让
+# 内核报 `bad interpreter: /usr/bin/env: no such file or directory`，
+# 表现成“脚本在 Windows 好好的，到服务器就执行不了”。
+* text=auto
+
+*.sh text eol=lf
+*.go text eol=lf
+*.md text eol=lf
+*.yml text eol=lf
+*.yaml text eol=lf
+*.conf text eol=lf
+*.template text eol=lf
+*.sql text eol=lf
+*.json text eol=lf
+
+# PowerShell / 批处理必须保持 CRLF
+*.ps1 text eol=crlf
+*.bat text eol=crlf
+
+# 图片与字体按二进制处理，禁止任何行尾转换
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.webp binary
+*.woff binary
+*.woff2 binary
+*.ttf binary
+*.zip binary
+*.sqlite binary

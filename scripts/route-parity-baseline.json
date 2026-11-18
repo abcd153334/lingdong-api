@@ -1,0 +1,33 @@
+{
+  "reference": "new-api/router/relay-router.go",
+  "note": "本文件是「已知且已判定」的兼容缺口基线。对账脚本 scripts/route-parity.py 用它与实际差分做减法：不在本文件里的缺口会被报成「未判定」并让脚本退出码为 1。新增条目必须写清 category 与 reason —— 不允许只加路径不写判定。",
+  "categories": {
+    "midjourney": "Midjourney 专用协议：需要 MJ 账号池 + Discord 机器人 + 一次性任务轮询。属新产品能力，不是协议适配。本平台的任务体系（tasks/artifacts）与该协议的 submit/fetch 两段式不是同一形状，硬套会产生第二套任务真相源。",
+    "websocket": "双向长连接通道。与本平台的「一次性 HTTP 请求 + SSE 单向流」是两套基础设施：需要连接级并发、按事件计费、断连重放语义。SSE 已覆盖同样的使用场景（流式输出），WS 是可选通道而非协议必需。",
+    "codex-native": "Codex 专有端点，上游路径是 /backend-api/codex/alpha/search，只有在接入 OpenAI 原生 Codex 渠道（专用适配器 + 专用鉴权）时才有意义。普通 OpenAI 兼容渠道无此能力，实现了也只能 501。",
+    "platform-ui": "兼容实现自己的 Web 测试台端点，走的是会话登录（UserAuth）而不是 API KEY，属于管理台功能，不在对外协议面。本平台的对应能力是管理台的在线调试，形态不同。"
+  },
+  "gaps": {
+    "POST /mj/submit/imagine": {"category": "midjourney", "reason": "MJ 出图任务提交"},
+    "POST /mj/submit/action": {"category": "midjourney", "reason": "MJ 任务动作（放大/变换/重绘）"},
+    "POST /mj/submit/modal": {"category": "midjourney", "reason": "MJ 弹窗输入提交"},
+    "POST /mj/submit/shorten": {"category": "midjourney", "reason": "MJ 提示词压缩"},
+    "POST /mj/submit/change": {"category": "midjourney", "reason": "MJ 局部重绘"},
+    "POST /mj/submit/simple-change": {"category": "midjourney", "reason": "MJ 简易局部重绘"},
+    "POST /mj/submit/describe": {"category": "midjourney", "reason": "MJ 图生提示词"},
+    "POST /mj/submit/blend": {"category": "midjourney", "reason": "MJ 多图融合"},
+    "POST /mj/submit/edits": {"category": "midjourney", "reason": "MJ 编辑提交"},
+    "POST /mj/submit/video": {"category": "midjourney", "reason": "MJ 视频生成"},
+    "POST /mj/submit/upload-discord-images": {"category": "midjourney", "reason": "MJ 图片上传到 Discord"},
+    "POST /mj/insight-face/swap": {"category": "midjourney", "reason": "MJ 换脸"},
+    "POST /mj/notify": {"category": "midjourney", "reason": "MJ 回调入口（对应实现已注册但被注释，属上游回调而非客户端接口）"},
+    "GET /mj/image/:p": {"category": "midjourney", "reason": "MJ 图片代理"},
+    "GET /mj/task/:p/fetch": {"category": "midjourney", "reason": "MJ 任务查询"},
+    "GET /mj/task/:p/image-seed": {"category": "midjourney", "reason": "MJ 图片 seed 查询"},
+    "POST /mj/task/list-by-condition": {"category": "midjourney", "reason": "MJ 任务列表查询"},
+    "GET /v1/realtime": {"category": "websocket", "reason": "OpenAI Realtime 语音双向流"},
+    "GET /v1/responses": {"category": "websocket", "reason": "Responses 的 WebSocket 通道；本平台已提供同能力的 SSE 流式（POST + stream:true）"},
+    "POST /v1/alpha/search": {"category": "codex-native", "reason": "Codex 独立搜索端点"},
+    "POST /pg/chat/completions": {"category": "platform-ui", "reason": "兼容实现的 Web 测试台"}
+  }
+}

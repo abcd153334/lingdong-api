@@ -1,0 +1,159 @@
+@import "tailwindcss";
+@import "./tokens.css";
+@import "./components.css";
+@import "./agent.css";
+@import "./model-service.css";
+@import "./admin-docs.css";
+@import "./plugin.css";
+
+html,
+body {
+  height: 100%;
+}
+/* #root 必须是 min-height，不能是 height —— 这条看起来等价，实际决定了门户顶栏会不会滚丢。
+   门户 .p-top（sticky; top:0）是 #root 的直接子元素，而 sticky 只能在**包含块**范围内吸附：
+   #root 一旦被钉成 100%（恰好一屏），滚过约一屏后顶栏就随包含块一起离开视口；此时
+   .page-tabs-bar 仍钉在 top: var(--topbar-h)，视口顶部就留下一条 64px（移动端 52px）
+   的纯背景带 —— 表现是「顶栏被隐藏了，页签上方空了一块」，实际没有任何隐藏逻辑。
+   管理台没有这个病，因为 .a-layout 用的是 min-height: 100vh（包含块随内容长高）。
+   改成 min-height 的连带影响已逐项核对为无：门户布局里没有从 #root 继承 height:100%
+   的子元素（.p-top 定高、.p-main/.p-foot 自适应、.p-tabbar 与抽屉/弹窗都是 fixed）；
+   .aurora / .agent-ws 用的都是 vh 或自身钉高，不读父级。 */
+#root {
+  min-height: 100%;
+}
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--t1);
+  font-family: var(--font);
+  font-size: 14px;
+  line-height: 1.65;
+  min-width: 320px;
+}
+
+/* ============================================================
+   滚动条（唯一实现处）
+   ------------------------------------------------------------
+   为什么不用 `scrollbar-color` 打头：Chromium 121+ 一旦在某个元素上看到
+   scrollbar-color / scrollbar-width 声明，就会切成标准实现并**整体忽略**
+   该元素的 ::-webkit-scrollbar —— 两套写法叠在同一元素上，谁生效取决于
+   浏览器版本，等于给「滚动条时好时坏」埋雷。所以这里分两条互斥路径：
+     · WebKit/Blink/Safari（`selector(::-webkit-scrollbar)` 为真）走伪元素，
+       能精确到 10px、圆角、去掉两端箭头；
+     · Firefox 走标准属性，它只认 scrollbar-width(thin)/scrollbar-color，
+       颜色仍来自同一组令牌。
+   为什么挂在 `*:not(html)` 上而不是给每个滚动容器挂类：全站滚动容器 50 余处（表格、
+   代码块、弹窗主体、侧栏导航、图标库网格…），逐处挂类就是逐处漏挂，且
+   新增页面时必然再漏。伪元素只在真正出现滚动条的元素上渲染，`*` 没有副作用。
+   排除 `html` 是刻意的：页面那一条必须由标准属性接管（见下面的 overlay 说明），
+   一旦项目样式也匹配它，旧浏览器就会退回占位型、与自绘条叠成两条。
+   ============================================================ */
+/* ── 为什么**不**给 html 加 `scrollbar-gutter: stable`（也别加回来） ──
+   `stable` 的语义是「滚动条那一条永远空着」。它能消掉「内容跨过一屏」时的 10px
+   横跳，代价是**没有滚动条的页面也少 10px**：实测视口 1280、内容不足一屏时，
+   `clientWidth` 报 1280（gutter 不算滚动条），而 `body` / `#root` / `.p-top` 的
+   右边界全是 1270 —— 右侧 10px 是浏览器保留、又没有任何内容的空带，看上去就是
+   顶栏被切掉一条（无滚动条时连 thumb 都没有，纯空白）。全站每条路由都吃这个代价，
+   只为消掉一次加载期的抖动。
+
+   锁滚动引起的横跳**不归它管**：唯一补偿实现在 lib/scrollLock.ts，按「锁前/锁后
+   body 的实测布局差」补右内边距 —— 页面有滚动条就补一个滚动条宽，本来就没滚动条
+   差值为 0 就不补。所以这里保持浏览器默认 `auto`：有滚动条才占位，没有就铺满。
+   觉得某处还在跳，去改 scrollLock 或页面结构，不要回到全局预留。 */
+
+/* ── 页面级滚动条：不占布局（overlay），由 components/chrome/PageScrollbar 自绘 ──
+   只要页面滚动条占位，**任何内容都画不到它下面那 10px**（`position:fixed` 也不行：
+   它的包含块同样被扣掉滚动条宽）。顶栏是横向铺满的 sticky 条，于是右侧永远缺一块，
+   与「有没有 gutter」无关。用负外边距硬补只会把内容顶出视口，换来一根横向滚动条
+   （实测 scrollWidth 1280 > clientWidth 1270，底部多出 10px 横条，且顶栏被裁）。
+   所以页面这一条必须 overlay：这里用 `scrollbar-width: none` 让 root 滚动条
+   **既不绘制也不占位**（滚动、键盘、锚点、window.scrollY 全都不受影响），视觉交给
+   固定层自绘条。内部容器（表格 / 代码块 / 侧栏 / 弹窗主体）继续用原生伪元素 ——
+   它们在自己的盒子里滚，不参与页面横向分配，占位是正确的。
+   顺带的好处：锁滚动时页面宽度不再变化，弹层开合连 10px 的补偿都不需要了。
+
+   **不能**用 `html::-webkit-scrollbar{width:0}` 代替：实测它的 computed width 已是
+   0px，滚动条也确实不画了，但 `clientWidth` 仍比 `innerWidth` 小 10 —— 占位还在，
+   顶栏依旧缺一块。只有标准属性会同时去掉绘制与占位（Chromium 121+ / Firefox /
+   Safari 18.2+）。代价是写了它之后 Chromium 会整体忽略该元素的 ::-webkit-scrollbar，
+   对 root 无所谓（已被隐藏），别把这条规则挪到内部容器上。 */
+html {
+  scrollbar-width: none;
+}
+
+*:not(html)::-webkit-scrollbar {
+  /* 必须同时给 width 与 height。只写 width 时横向滚动条仍用 UA 默认（~15px），
+     表格与代码块的横条会比竖条粗一倍 —— 自绘滚动条最常漏的一条。 */
+  width: var(--sb-size);
+  height: var(--sb-size);
+}
+*:not(html)::-webkit-scrollbar-track {
+  background: var(--sb-track);
+}
+*:not(html)::-webkit-scrollbar-thumb {
+  /* 透明边框 + padding-box 裁剪：轨道仍占 10px（热区够大），视觉厚度只有
+     10-2*2=6px。直接把 width 调成 6px 会连可点击区域一起变窄。 */
+  border: 2px solid transparent;
+  border-radius: 999px;
+  background-color: var(--sb-thumb);
+  background-clip: padding-box;
+}
+/* 刻意不给 :hover / :active 加深。`*:not(html)::-webkit-scrollbar-thumb:hover` 里的
+   `:hover` 判的是**宿主元素**而不是 thumb：html 恒被鼠标覆盖，于是页面主滚动条
+   永远停在加深色，内部容器却只有鼠标移进去才变 —— 两档颜色反而制造出新的不一致
+   （实测根 scrollbar thumb 的 computed 值恒为加深档）。要精确的 hover 反馈就得
+   按容器逐个挂选择器，那又回到「逐处漏挂」的老路，不如一档到底。 */
+/* 两端箭头（Windows 专属）与横竖交汇处的方块：不写这两条，暗色页面里会留下
+   一条浅灰箭头带和一个白色小方块 —— 比滚动条本身更显眼。 */
+*:not(html)::-webkit-scrollbar-button {
+  display: none;
+  width: 0;
+  height: 0;
+}
+*:not(html)::-webkit-scrollbar-corner {
+  background: var(--sb-track);
+}
+
+/* 自绘页面条（.pg-sb，几何与配色在 components.css）何时显示，由这里判定：
+   只有 `scrollbar-width: none` 真正生效时，root 滚动条才既不绘制也不占位，
+   自绘条才有意义。旧 Safari（<18.2）不支持该属性，但系统滚动条本来就是 overlay，
+   此时再画一条会变成两条 —— 那比缺一条更糟，所以宁可不显示。 */
+@supports (scrollbar-width: none) {
+  .pg-sb:not([hidden]) {
+    display: block;
+  }
+}
+
+/* Firefox：不支持 ::-webkit-scrollbar。scrollbar-width 不继承，只有 `*` 能一次
+   覆盖全部滚动容器；没有 hover 态（标准属性不支持），可接受。 */
+@supports not selector(::-webkit-scrollbar) {
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: var(--sb-thumb) var(--sb-track);
+  }
+}
+
+/* 移动端 Tab 横滚条隐藏（scroll-snap + 右缘渐隐代替滚动条）。与上面同属滚动条
+   实现，放在同一处 —— 原先散在 components.css 的移动端媒体查询里。 */
+@media (max-width: 767px) {
+  .tabs,
+  .pill-tabs {
+    scrollbar-width: none;
+  }
+  .tabs::-webkit-scrollbar,
+  .pill-tabs::-webkit-scrollbar {
+    display: none;
+  }
+}
+
+/* 品牌渐变（对齐 prototype.css --grad / .p-logo .dot） */
+.bg-grad {
+  background-image: var(--grad);
+}
+
+/* 等宽数字排版 */
+.tnum {
+  font-variant-numeric: tabular-nums;
+}

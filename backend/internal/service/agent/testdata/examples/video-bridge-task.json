@@ -1,0 +1,80 @@
+{
+  "operations": [
+    {
+      "op": "create",
+      "entity": "vendor",
+      "key": "kuaishou",
+      "data": { "name": "快手" }
+    },
+    {
+      "op": "create",
+      "entity": "adapter_spec",
+      "key": "relay-video",
+      "data": {
+        "label": "视频中转",
+        "vendor": "kuaishou",
+        "spec": {
+          "endpoints": {
+            "video/generations": {
+              "method": "POST",
+              "path": "/v1/videos",
+              "body": { "copy": { "prompt": "$req.prompt" } },
+              "extract": { "task_id": "$.id" },
+              "errors": { "success": "body_code", "code_path": "$.code", "ok_codes": ["0"] },
+              "async": { "mode": "task", "poll": "video/generations@poll" }
+            },
+            "video/generations@poll": {
+              "method": "GET",
+              "path": "/v1/videos/{task_id}",
+              "extract": {
+                "status": "$.status",
+                "error": "$.message",
+                "result_urls": "$.data.videos[*].url"
+              },
+              "status_map": {
+                "queued": ["queued"],
+                "running": ["processing"],
+                "succeeded": ["succeed"],
+                "failed": ["failed"]
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "op": "create",
+      "entity": "channel",
+      "key": "kling-cn",
+      "data": {
+        "name": "可灵-国内",
+        "adapter_id": "spec:relay-video",
+        "base_url": "https://api.k.example",
+        "keys": ["sk-k"],
+        "groups": ["default"]
+      }
+    },
+    {
+      "op": "create",
+      "entity": "model",
+      "key": "kling-v3",
+      "data": {
+        "display_name": "可灵 v3",
+        "vendor": "kuaishou",
+        "modality": "video",
+        "billing_mode": "spec",
+        "endpoints": ["video/generations"],
+        "capabilities": ["t2v", "i2v", "first_last"],
+        "spec_prices": { "kind": "per_video", "max_seconds": 10, "second_price": { "720p": 9000 } }
+      }
+    },
+    {
+      "op": "replace",
+      "entity": "model_bindings",
+      "key": "kling-v3",
+      "data": {
+        "bindings": [{ "channel_key": "kling-cn", "upstream_model": "kling-v3" }]
+      }
+    }
+  ]
+}

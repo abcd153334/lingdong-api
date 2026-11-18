@@ -1,0 +1,112 @@
+<!DOCTYPE html>
+<!--
+  管理台「标准工具视图」：内嵌的 Swagger UI。
+
+  与自研三栏页共用同一份 OpenAPI（由 apicontract 派生），区别只是渲染器：
+  自研页给中文、可深链、可调试；这一页给"熟悉的工具"——接入方可以直接
+  用 Try it out，也可以把地址发给同事。
+
+  三处安全设置是**必须**的，删掉任何一条都会引入一个真实问题：
+    1. url 由服务端注入（%%SPEC_URL%%），本页不读任何 query 参数 ——
+       否则 `?url=‹外站地址›` 会让 Swagger UI 去拉外部文档，
+       等于开放一个 SSRF 入口。
+    2. validatorUrl: null —— Swagger UI 默认把 spec 发给 validator.swagger.io，
+       这是真正的外站泄漏（这条最容易漏，因为页面看起来一切正常）。
+    3. persistAuthorization: false —— 不把粘贴的密钥写进 localStorage。
+-->
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>开放接口 · Swagger UI</title>
+    <link rel="stylesheet" type="text/css" href="./swagger-ui.css" />
+    <style>
+      html {
+        box-sizing: border-box;
+        overflow-y: scroll;
+      }
+      *,
+      *:before,
+      *:after {
+        box-sizing: inherit;
+      }
+      body {
+        margin: 0;
+        background: #fafafa;
+      }
+      .topbar {
+        display: none;
+      }
+      /* 顶栏自己画：默认 topbar 带 Swagger 品牌与「Explore」输入框，
+         后者是 ?url= 注入的入口，必须去掉。 */
+      .ld-bar {
+        position: sticky;
+        top: 0;
+        z-index: 10;
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        padding: 10px 20px;
+        background: #fff;
+        border-bottom: 1px solid #e5e7eb;
+        font: 13px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif;
+        color: #374151;
+      }
+      .ld-bar b {
+        font-size: 14px;
+        color: #111827;
+      }
+      .ld-bar span {
+        color: #6b7280;
+      }
+      .ld-bar a {
+        margin-left: auto;
+        color: #2563eb;
+        text-decoration: none;
+      }
+      .ld-bar a:hover {
+        text-decoration: underline;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="ld-bar">
+      <b>开放接口</b>
+      <span>标准工具视图 · 与「接口文档」页共用同一份契约</span>
+      <a id="ld-back" href="../">返回接口文档</a>
+    </div>
+    <div id="swagger-ui"></div>
+    <script>
+      // 返回链接由 location 派生，不写死路径：
+      // 本页在 `/api/admin/api-docs/ui/`，管理台页面在 `/admin/api-docs`
+      // —— 正好是同一段路径去掉 `/api` 前缀。nginx 子路径部署时
+      // 前缀（如 `/lingdong`）自动保留，写死 `/admin/api-docs` 会 404。
+      (function () {
+        var m = location.pathname.match(/^(.*)\/api\/admin\/api-docs\/ui\//);
+        if (m) document.getElementById("ld-back").setAttribute("href", m[1] + "/admin/api-docs");
+      })();
+    </script>
+    <script src="./swagger-ui-bundle.js" charset="UTF-8"></script>
+    <script>
+      window.ui = SwaggerUIBundle({
+        url: "%%SPEC_URL%%",
+        dom_id: "#swagger-ui",
+        deepLinking: true,
+        // 默认收起 Try it out：这是一份文档页，误点会真的发请求。
+        tryItOutEnabled: false,
+        // 不把密钥持久化到 localStorage。
+        persistAuthorization: false,
+        // 不把 spec 发到外站校验（默认值是 validator.swagger.io）。
+        validatorUrl: null,
+        // 不要 standalone preset：请求「模型」面板用不到它，省 264KB
+        // 与一次静态资源鉴权。
+        presets: [SwaggerUIBundle.presets.apis],
+        layout: "BaseLayout",
+        docExpansion: "none",
+        defaultModelsExpandDepth: 1,
+        displayRequestDuration: true,
+        filter: true,
+      });
+    </script>
+  </body>
+</html>

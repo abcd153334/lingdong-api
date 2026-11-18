@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="zh-CN" data-theme="light">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <!-- 首帧就让浏览器知道暗色是合法的：CSS 到达前 html 背景与原生滚动条
+         不会再先亮一下（与下面的主题前置脚本同一套判据）。 -->
+    <meta name="color-scheme" content="light dark" />
+    <title>灵动 API</title>
+    <script>
+      // 主题前置：key=ld-theme，默认 light（对齐 prototype.js applyTheme）
+      (function () {
+        try {
+          var t = localStorage.getItem("ld-theme");
+          if (t !== "light" && t !== "dark") {
+            t =
+              window.matchMedia &&
+              window.matchMedia("(prefers-color-scheme: dark)").matches
+                ? "dark"
+                : "light";
+          }
+          document.documentElement.setAttribute("data-theme", t);
+        } catch (e) {
+          document.documentElement.setAttribute("data-theme", "light");
+        }
+      })();
+    </script>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

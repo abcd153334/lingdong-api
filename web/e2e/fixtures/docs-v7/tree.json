@@ -1,0 +1,559 @@
+{
+  "contract_version": "5",
+  "shape": 7,
+  "base_url": "https://lapi.example.com",
+  "sections": [
+    {
+      "id": "start",
+      "en": "",
+      "name": "开始使用",
+      "desc": "密钥、地址与通用约定",
+      "color": "#0ea5e9",
+      "nodes": [
+        {
+          "key": "quickstart",
+          "kind": "guide",
+          "title": "快速开始",
+          "summary": "",
+          "models": 0,
+          "status": "published",
+          "endpoints": []
+        },
+        {
+          "key": "auth",
+          "kind": "guide",
+          "title": "鉴权与密钥",
+          "summary": "",
+          "models": 0,
+          "status": "published",
+          "endpoints": []
+        },
+        {
+          "key": "errors",
+          "kind": "guide",
+          "title": "错误码",
+          "summary": "",
+          "models": 0,
+          "status": "published",
+          "endpoints": []
+        }
+      ]
+    },
+    {
+      "id": "general",
+      "en": "",
+      "name": "通用接口",
+      "desc": "模型清单、文件、任务与账户",
+      "color": "#6366f1",
+      "nodes": [
+        {
+          "key": "files",
+          "kind": "general",
+          "title": "文件与产物",
+          "summary": "上传素材、下载产物与产物直链代理。",
+          "models": 0,
+          "status": "published",
+          "endpoints": [
+            {
+              "key": "ep-files-upload",
+              "name": "上传文件",
+              "method": "POST",
+              "path": "/v1/files",
+              "badge": ""
+            },
+            {
+              "key": "ep-files-list",
+              "name": "文件列表",
+              "method": "GET",
+              "path": "/v1/files",
+              "badge": ""
+            },
+            {
+              "key": "ep-files-get",
+              "name": "查询文件",
+              "method": "GET",
+              "path": "/v1/files/{id}",
+              "badge": ""
+            },
+            {
+              "key": "ep-files-content",
+              "name": "下载文件内容",
+              "method": "GET",
+              "path": "/v1/files/{id}/content",
+              "badge": "binary"
+            },
+            {
+              "key": "ep-files-delete",
+              "name": "删除文件",
+              "method": "DELETE",
+              "path": "/v1/files/{id}",
+              "badge": ""
+            },
+            {
+              "key": "ep-files-direct",
+              "name": "文件直链下载",
+              "method": "GET",
+              "path": "/f/{id}/{name}",
+              "badge": "binary"
+            },
+            {
+              "key": "ep-media-proxy",
+              "name": "产物代理",
+              "method": "GET",
+              "path": "/v1/media/{token}",
+              "badge": "binary"
+            }
+          ]
+        },
+        {
+          "key": "tasks",
+          "kind": "general",
+          "title": "异步任务",
+          "summary": "跨模型的统一任务列表与再生成。",
+          "models": 0,
+          "status": "published",
+          "endpoints": [
+            {
+              "key": "ep-tasks-list",
+              "name": "任务列表",
+              "method": "GET",
+              "path": "/v1/tasks",
+              "badge": ""
+            },
+            {
+              "key": "ep-tasks-get",
+              "name": "任务详情",
+              "method": "GET",
+              "path": "/v1/tasks/{id}",
+              "badge": ""
+            },
+            {
+              "key": "ep-tasks-content-at",
+              "name": "下载任务产物",
+              "method": "GET",
+              "path": "/v1/tasks/{id}/contents/{index}",
+              "badge": "binary"
+            },
+            {
+              "key": "ep-tasks-cancel",
+              "name": "取消任务",
+              "method": "DELETE",
+              "path": "/v1/tasks/{id}",
+              "badge": ""
+            },
+            {
+              "key": "ep-video-regenerations",
+              "name": "视频再生成（升档）",
+              "method": "POST",
+              "path": "/v1/video/regenerations",
+              "badge": ""
+            }
+          ]
+        },
+        {
+          "key": "models",
+          "kind": "general",
+          "title": "模型清单",
+          "summary": "查询可用模型与默认模型。",
+          "models": 0,
+          "status": "published",
+          "endpoints": [
+            {
+              "key": "ep-models-list",
+              "name": "可用模型列表",
+              "method": "GET",
+              "path": "/v1/models",
+              "badge": ""
+            },
+            {
+              "key": "ep-models-get",
+              "name": "单模型查询",
+              "method": "GET",
+              "path": "/v1/models/{model}",
+              "badge": ""
+            },
+            {
+              "key": "ep-models-defaults",
+              "name": "各类默认模型",
+              "method": "GET",
+              "path": "/v1/models/defaults",
+              "badge": ""
+            }
+          ]
+        },
+        {
+          "key": "account",
+          "kind": "general",
+          "title": "账户与用量",
+          "summary": "余额、调用明细与用量汇总。",
+          "models": 0,
+          "status": "published",
+          "endpoints": [
+            {
+              "key": "ep-account",
+              "name": "账户信息",
+              "method": "GET",
+              "path": "/v1/account",
+              "badge": ""
+            },
+            {
+              "key": "ep-usage-list",
+              "name": "调用明细",
+              "method": "GET",
+              "path": "/v1/usage",
+              "badge": ""
+            },
+            {
+              "key": "ep-usage-summary",
+              "name": "用量汇总",
+              "method": "GET",
+              "path": "/v1/usage/summary",
+              "badge": ""
+            },
+            {
+              "key": "ep-billing-subscription",
+              "name": "订阅配额（兼容）",
+              "method": "GET",
+              "path": "/v1/dashboard/billing/subscription",
+              "badge": ""
+            },
+            {
+              "key": "ep-billing-usage",
+              "name": "累计用量（兼容）",
+              "method": "GET",
+              "path": "/v1/dashboard/billing/usage",
+              "badge": ""
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "protocols",
+      "en": "Protocols",
+      "name": "语言",
+      "desc": "OpenAI 兼容 / Claude 原生 / Embeddings —— 固定协议文档",
+      "color": "#6366f1",
+      "nodes": [
+        {
+          "key": "openai",
+          "kind": "protocol",
+          "title": "OpenAI 兼容",
+          "summary": "对话、补全、智能体接口与内容审核，按 OpenAI 官方协议收发。",
+          "models": 2,
+          "status": "published",
+          "endpoints": [
+            {
+              "key": "ep-chat-completions",
+              "name": "对话补全",
+              "method": "POST",
+              "path": "/v1/chat/completions",
+              "badge": "stream"
+            },
+            {
+              "key": "ep-completions",
+              "name": "文本补全",
+              "method": "POST",
+              "path": "/v1/completions",
+              "badge": ""
+            },
+            {
+              "key": "ep-responses",
+              "name": "新版智能体接口",
+              "method": "POST",
+              "path": "/v1/responses",
+              "badge": ""
+            },
+            {
+              "key": "ep-moderations",
+              "name": "内容审核",
+              "method": "POST",
+              "path": "/v1/moderations",
+              "badge": ""
+            }
+          ]
+        },
+        {
+          "key": "claude",
+          "kind": "protocol",
+          "title": "Claude 原生",
+          "summary": "Anthropic Messages 协议（/v1/messages）。",
+          "models": 2,
+          "status": "published",
+          "endpoints": [
+            {
+              "key": "ep-messages",
+              "name": "对话补全（Anthropic 格式）",
+              "method": "POST",
+              "path": "/v1/messages",
+              "badge": "stream"
+            }
+          ]
+        },
+        {
+          "key": "embeddings",
+          "kind": "protocol",
+          "title": "Embeddings",
+          "summary": "文本向量化与相关性重排。",
+          "models": 0,
+          "status": "published",
+          "endpoints": [
+            {
+              "key": "ep-embeddings",
+              "name": "文本向量化",
+              "method": "POST",
+              "path": "/v1/embeddings",
+              "badge": ""
+            },
+            {
+              "key": "ep-rerank",
+              "name": "相关性重排",
+              "method": "POST",
+              "path": "/v1/rerank",
+              "badge": ""
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "images",
+      "en": "Images",
+      "name": "图片",
+      "desc": "文生图 / 图生图 / 异步出图",
+      "color": "#8b5cf6",
+      "nodes": [
+        {
+          "key": "images-gpt-image",
+          "kind": "family",
+          "title": "GPT Image",
+          "summary": "OpenAI 图像协议：文生图、图生图与变化图，支持 async 异步出图。",
+          "models": 5,
+          "status": "published",
+          "endpoints": [
+            {
+              "key": "ep-images-gpt-image-images-generations",
+              "name": "生成图片",
+              "method": "POST",
+              "path": "/v1/images/generations",
+              "badge": "async"
+            },
+            {
+              "key": "ep-images-gpt-image-images-edits",
+              "name": "编辑图片",
+              "method": "POST",
+              "path": "/v1/images/edits",
+              "badge": ""
+            },
+            {
+              "key": "ep-images-gpt-image-images-variations",
+              "name": "图片变体",
+              "method": "POST",
+              "path": "/v1/images/variations",
+              "badge": ""
+            },
+            {
+              "key": "ep-images-gpt-image-tasks-get",
+              "name": "查询任务状态",
+              "method": "GET",
+              "path": "/v1/tasks/{id}",
+              "badge": ""
+            }
+          ]
+        },
+        {
+          "key": "images-nano-banana",
+          "kind": "family",
+          "title": "Nano Banana",
+          "summary": "Gemini 图像协议：文生图与多图编辑。",
+          "models": 3,
+          "status": "published",
+          "endpoints": [
+            {
+              "key": "ep-images-nano-banana-images-generations",
+              "name": "文生图",
+              "method": "POST",
+              "path": "/v1/images/generations",
+              "badge": "async"
+            },
+            {
+              "key": "ep-images-nano-banana-images-edits",
+              "name": "图生图（图片编辑）",
+              "method": "POST",
+              "path": "/v1/images/edits",
+              "badge": ""
+            },
+            {
+              "key": "ep-images-nano-banana-tasks-get",
+              "name": "查询任务状态",
+              "method": "GET",
+              "path": "/v1/tasks/{id}",
+              "badge": ""
+            }
+          ]
+        },
+        {
+          "key": "images-seedream",
+          "kind": "family",
+          "title": "Seedream",
+          "summary": "Seedream 原生报文：size 与 sequential_image_generation 表达尺寸与张数。",
+          "models": 3,
+          "status": "published",
+          "endpoints": [
+            {
+              "key": "ep-images-seedream-images-generations",
+              "name": "图片生成",
+              "method": "POST",
+              "path": "/v1/images/generations",
+              "badge": "async"
+            },
+            {
+              "key": "ep-images-seedream-tasks-get",
+              "name": "查询任务状态",
+              "method": "GET",
+              "path": "/v1/tasks/{id}",
+              "badge": ""
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "videos",
+      "en": "Videos",
+      "name": "视频",
+      "desc": "异步任务：提交 → 查询 → 下载",
+      "color": "#ec4899",
+      "nodes": [
+        {
+          "key": "videos-kling",
+          "kind": "family",
+          "title": "可灵",
+          "summary": "可灵视频任务：提交 → 查询 → 下载。",
+          "models": 2,
+          "status": "published",
+          "endpoints": [
+            {
+              "key": "ep-videos-kling-video-submit",
+              "name": "创建视频任务",
+              "method": "POST",
+              "path": "/v1/video/generations",
+              "badge": ""
+            },
+            {
+              "key": "ep-videos-kling-tasks-get",
+              "name": "查询任务状态",
+              "method": "GET",
+              "path": "/v1/tasks/{id}",
+              "badge": ""
+            }
+          ]
+        },
+        {
+          "key": "videos-seedance",
+          "kind": "family",
+          "title": "Seedance",
+          "summary": "Seedance 视频任务：主篇与即梦原生报文两套写法。",
+          "models": 4,
+          "status": "published",
+          "endpoints": [
+            {
+              "key": "ep-videos-seedance-video-submit",
+              "name": "创建视频生成任务",
+              "method": "POST",
+              "path": "/v1/video/generations",
+              "badge": ""
+            },
+            {
+              "key": "ep-videos-seedance-video-submit--jimeng",
+              "name": "创建视频生成任务（原生报文）",
+              "method": "POST",
+              "path": "/v1/video/generations",
+              "badge": ""
+            },
+            {
+              "key": "ep-videos-seedance-tasks-get",
+              "name": "查询任务状态",
+              "method": "GET",
+              "path": "/v1/tasks/{id}",
+              "badge": ""
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "audio",
+      "en": "Audio",
+      "name": "音频",
+      "desc": "语音合成 / 语音识别 / 翻译",
+      "color": "#f59e0b",
+      "nodes": [
+        {
+          "key": "audio-whisper",
+          "kind": "family",
+          "title": "语音识别",
+          "summary": "OpenAI 语音识别协议：转写与翻译，multipart 上传音频。",
+          "models": 0,
+          "status": "published",
+          "endpoints": [
+            {
+              "key": "ep-audio-whisper-audio-transcriptions",
+              "name": "语音转写",
+              "method": "POST",
+              "path": "/v1/audio/transcriptions",
+              "badge": ""
+            },
+            {
+              "key": "ep-audio-whisper-audio-translations",
+              "name": "语音翻译",
+              "method": "POST",
+              "path": "/v1/audio/translations",
+              "badge": ""
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "music",
+      "en": "Music",
+      "name": "音乐",
+      "desc": "音乐生成 / 歌词生成",
+      "color": "#14b8a6",
+      "nodes": [
+        {
+          "key": "music-suno",
+          "kind": "family",
+          "title": "SUNO",
+          "summary": "音乐与歌词生成：一次任务出两首，产物按实际转存数计费。",
+          "models": 1,
+          "status": "published",
+          "endpoints": [
+            {
+              "key": "ep-music-suno-audio-music",
+              "name": "生成音乐",
+              "method": "POST",
+              "path": "/v1/audio/music/generations",
+              "badge": ""
+            },
+            {
+              "key": "ep-music-suno-audio-lyrics",
+              "name": "生成歌词",
+              "method": "POST",
+              "path": "/v1/audio/lyrics",
+              "badge": ""
+            },
+            {
+              "key": "ep-music-suno-tasks-get",
+              "name": "查询任务状态",
+              "method": "GET",
+              "path": "/v1/tasks/{id}",
+              "badge": ""
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}
