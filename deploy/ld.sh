@@ -6,6 +6,14 @@
 set -euo pipefail
 DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
+# 编排文件：默认 docker-compose.yml；本机已有别的站点占着 80/443、或不想把
+# 数据库端口发布到宿主机时，用 COMPOSE_FILE 指到一个 override 文件（它 include 基座）。
+#
+# scripts/*.sh 一直认这个变量（common.sh: COMPOSE_FILE="${COMPOSE_FILE:-...}"），
+# 只有本入口把文件名写死了 —— 于是最常用的 up/down/ps/logs/config 恰好用不了 override，
+# 而 tag/upgrade/health/backup 可以。同一套部署两套语义，排障时最难想到。
+COMPOSE_FILE="${COMPOSE_FILE:-docker-compose.yml}"
+
 usage() {
   cat <<'EOF'
 用法：bash deploy/ld.sh <命令> [参数]
@@ -27,20 +35,20 @@ EOF
 case "${1-}" in
   up)
     shift
-    ( cd "$DIR" && docker compose -f docker-compose.yml up -d --build "$@" )
+    ( cd "$DIR" && docker compose -f "$COMPOSE_FILE" up -d --build "$@" )
     bash "$DIR/scripts/healthcheck.sh" --wait 120
     ;;
   down)
     shift
     # 不加 -t：让 compose 使用各服务的 stop_grace_period（默认 10s 会硬切在途请求）
-    ( cd "$DIR" && docker compose -f docker-compose.yml down "$@" )
+    ( cd "$DIR" && docker compose -f "$COMPOSE_FILE" down "$@" )
     ;;
   ps)
-    ( cd "$DIR" && docker compose -f docker-compose.yml ps )
+    ( cd "$DIR" && docker compose -f "$COMPOSE_FILE" ps )
     ;;
   logs)
     svc="${2:-backend}"
-    ( cd "$DIR" && docker compose -f docker-compose.yml logs -f --tail=200 "$svc" )
+    ( cd "$DIR" && docker compose -f "$COMPOSE_FILE" logs -f --tail=200 "$svc" )
     ;;
   health)      bash "$DIR/scripts/healthcheck.sh" "${@:2}" ;;
   preflight)   bash "$DIR/scripts/preflight.sh" ;;
@@ -49,7 +57,7 @@ case "${1-}" in
   upgrade)     bash "$DIR/scripts/upgrade.sh" "${@:2}" ;;
   tag)         bash "$DIR/scripts/tag-release.sh" "${@:2}" ;;
   config)
-    ( cd "$DIR" && docker compose -f docker-compose.yml config -q && echo "compose OK" )
+    ( cd "$DIR" && docker compose -f "$COMPOSE_FILE" config -q && echo "compose OK" )
     ;;
   ""|-h|--help) usage ;;
   *) usage; exit 1 ;;

@@ -72,7 +72,15 @@ printf '%s\n' "$actual"
 
 if [ -n "$VERIFY_FILE" ] && [ -f "$VERIFY_FILE" ]; then
   expected="$(grep -E '^fingerprint = ' "$VERIFY_FILE" | head -1 | sed 's/^fingerprint = //')"
-  if [ -n "$expected" ]; then
+  if [ "$expected" = "empty" ]; then
+    # 备份时库还是空的（全新实例，业务表都没建）：没有账务可对，逐项比会假红。
+    # 仍然要求"恢复后确实有表"，否则说明这份 dump 根本没东西。
+    tables_now="$(compose exec -T postgres psql "$TARGET_DSN" --no-psqlrc --tuples-only --no-align \
+      -c "select count(*) from information_schema.tables where table_schema='public'" 2>/dev/null | tr -d '\r' | head -n1)"
+    [ "${tables_now:-0}" -gt 0 ] 2>/dev/null \
+      || die "备份记为 empty，恢复后目标库却是 0 张表：这份 dump 不可用"
+    warn "备份指纹为 empty（当时是空库）：跳过逐项比对，只确认已恢复 $tables_now 张表"
+  elif [ -n "$expected" ]; then
     norm() { printf '%s' "$1" | tr -d '[:space:]|'; }
     if [ "$(norm "$expected")" = "$(norm "$actual")" ]; then
       ok "9 项账务指纹与备份一致"

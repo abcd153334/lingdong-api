@@ -15,8 +15,9 @@
 #     会把一个健康的新版本判成失败并触发回滚。
 
 source "$(dirname "${BASH_SOURCE[0]}")/lib/common.sh"
+source "$(dirname "${BASH_SOURCE[0]}")/lib/compose.sh"
 
-BASE="http://127.0.0.1:8080"
+BASE=""
 WAIT=0
 EXPECT=""
 REQUIRE_DB=0
@@ -30,6 +31,24 @@ while [ $# -gt 0 ]; do
     *) die "未知参数：$1" ;;
   esac
 done
+
+# 默认探测地址**从编排的端口映射解析**，不写死 127.0.0.1:8080。
+#
+# 写死的后果不是「探不到」，而是「探到别人、还判通过」：宿主机 8080 上完全可能跑着
+# 不相干的服务（本机就有一条 frp 隧道通到另一套生产实例）。此时新容器正在崩溃重启，
+# 健康检查照样 200，`upgrade` 于是报「已切到 vX」——把最该拦住的失败放行。
+# 真机上就是这样：后端压根没起来，检查输出的却是另一套实例的 version/uptime。
+default_base() {
+  local pub=""
+  pub="$(compose port backend 8080 2>/dev/null | head -n1 | tr -d '\r')"
+  case "$pub" in
+    0.0.0.0:*|:::*) pub="127.0.0.1:${pub##*:}" ;;
+  esac
+  if [ -n "$pub" ]; then printf 'http://%s' "$pub"; return; fi
+  printf 'http://127.0.0.1:8080'
+}
+if [ -z "$BASE" ]; then BASE="$(default_base)"; fi
+log "探测地址：$BASE"
 
 require_cmd curl
 

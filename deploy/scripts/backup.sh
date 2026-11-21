@@ -52,9 +52,26 @@ fi
 ok "dump 完成（$(du -h "$dump" | awk '{print $1}')）"
 
 log "采集账务指纹"
-fingerprint="$(compose exec -T postgres psql "$DSN" --no-psqlrc --tuples-only --no-align \
-  < "$SCRIPT_DIR/lib/fingerprint.sql" | tr -d '\r')"
-[ -n "$fingerprint" ] || die "指纹采集失败：备份文件已生成但**未校验**，不要把它当成可用备份"
+# 全新实例（业务表还没建）没有"账务"可对：此时指纹记为 empty，让发布能继续走，
+# 但**仍然校验 dump 本身是真的 custom 格式归档**——否则"空备份"会被当成好备份。
+#
+# 为什么必须区分「空库」与「采集失败」：v2.1.3 之前两者都走 die，结果是**第一次部署
+# 永远过不去**（upgrade 要求"无备份不升级"，而空库上备份必失败），运维只能 --no-backup
+# 硬闯，正好绕开了唯一的那道保护。
+has_core="$(compose exec -T postgres psql "$DSN" --no-psqlrc --tuples-only --no-align \
+  -c "select count(*) from information_schema.tables where table_schema='public' and table_name in ('users','transactions','usages')" \
+  2>/dev/null | tr -d '\r' | head -n1)"
+if [ "${has_core:-0}" -ge 3 ] 2>/dev/null; then
+  fingerprint="$(compose exec -T postgres psql "$DSN" --no-psqlrc --tuples-only --no-align \
+    < "$SCRIPT_DIR/lib/fingerprint.sql" | tr -d '\r')"
+  [ -n "$fingerprint" ] || die "指纹采集失败：备份文件已生成但**未校验**，不要把它当成可用备份"
+else
+  head -c 5 "$dump" | grep -q 'PGDMP' \
+    || die "dump 不是有效的 PostgreSQL custom 归档：$dump（这份文件不能用来恢复）"
+  fingerprint="empty"
+  warn "目标库还没有业务表（全新实例）：指纹记为 empty。此时 data_epoch 不可用，"
+  warn "  首次发布完成、业务表建好之后，请再跑一次 backup（或 tag）把真实指纹记账。"
+fi
 
 log "判定对象存储位置"
 # active 为空或 none 都表示本地卷（registry.go 把两者都归到 localStore）。

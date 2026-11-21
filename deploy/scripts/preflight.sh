@@ -102,7 +102,18 @@ if [ -n "$dsn_explicit" ] && [ -n "$pgpw" ]; then
 fi
 
 # ---------- 5. 反代与模式 ----------
+#
+# .env 里不写 LD_TRUSTED_PROXIES 是**推荐**姿势：编排给了与 subnet 配对的默认值
+# （LD_TRUSTED_PROXIES=${LD_TRUSTED_PROXIES:-172.29.0.0/24}）。只读 .env 的写法
+# 于是让每一次默认部署都报一条「为空」—— 假警告叫得多了，真警告就没人看。
+# 这里按「容器实际拿到的值」判断：先 .env，再 compose 解析结果。
 tp="$(read_env LD_TRUSTED_PROXIES '')"
+tp_src=".env"
+if [ -z "$tp" ] && command -v docker >/dev/null 2>&1 && docker compose version >/dev/null 2>&1; then
+  tp="$( ( cd "$DEPLOY_DIR" && docker compose -f "$(basename "$COMPOSE_FILE")" config ) 2>/dev/null \
+        | sed -n 's/^ *LD_TRUSTED_PROXIES: *//p' | head -n1 | tr -d "\"'" | tr -d '\r')"
+  tp_src="编排默认值"
+fi
 if [ -n "$tp" ]; then
   bad=0
   IFS=',' read -ra parts <<< "$tp"
@@ -119,9 +130,17 @@ if [ -n "$tp" ]; then
         ;;
     esac
   done
-  if [ "$bad" -eq 0 ]; then pass "LD_TRUSTED_PROXIES 合法：$tp"; fi
+  if [ "$bad" -eq 0 ]; then pass "LD_TRUSTED_PROXIES 合法（$tp_src）：$tp"; fi
 else
   warn "LD_TRUSTED_PROXIES 为空：只适用于「直连」部署；经反代时所有用户会塌进同一个限流桶"
+fi
+
+# APP_ENV=prod 时会话 Cookie 带 Secure，浏览器**不会**在 http:// 上回传它。
+# 这一点在真机上表现为最难自查的一种故障：登录接口 200、紧接着所有请求 401，
+# 用户以为「登录成功了又掉线」，运维以为是会话存储坏了。
+if [ "$(read_env APP_ENV '')" = "prod" ]; then
+  warn "APP_ENV=prod：会话 Cookie 带 Secure，只经 HTTPS 回传。"
+  warn "  用 http://IP:端口 直连会「登录成功但立刻掉线」——对外必须先做 TLS 终止（443 或反代到本机）。"
 fi
 
 mode="$(read_env LD_NODE_MODE 'full')"

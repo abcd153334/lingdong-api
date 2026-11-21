@@ -64,7 +64,12 @@ else
 fi
 
 log "等待健康（最多 120s）"
-if bash "$SCRIPT_DIR/healthcheck.sh" --wait 120; then
+# 必须带 --expect-version 与 --require-db —— 这是 healthcheck.sh 头部写明的约定，
+# 而调用点此前一直没传，等于把门禁做成了摆设：
+#   - 不带 --expect-version：`up -d` 没真正换掉镜像（或被同名旧镜像顶替）时旧进程照样 200，
+#     于是「已切到 vX」是个谎；真机上 v2.1.2 后端一直在崩溃重启，检查却报 PASS；
+#   - 不带 --require-db：把「能返回 200」当成「DB 真能用」。
+if bash "$SCRIPT_DIR/healthcheck.sh" --wait 120 --expect-version "$TAG_ARG" --require-db; then
   ok "已切到 $TAG_ARG"
 else
   warn "新版本未通过健康检查"

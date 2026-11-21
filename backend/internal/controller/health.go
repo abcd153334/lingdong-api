@@ -23,11 +23,14 @@ import (
 // v2.1.2：修复 deploy/scripts/lib/common.sh 的路径少退一级（所有部署脚本因此不可用）。
 // v2.1.3：修复后端镜像在 linux/amd64 下启动即 SIGSEGV（退出码 139）——
 // gen2brain/webp → purego/fakecgo 在 rt0_go 阶段调 NULL；解法是构建加 -tags nodynamic。
+// v2.1.4：真机部署验收修的一批部署面缺陷（脚本/编排，见 deploy/）：升级门禁不核对版本、
+// 健康检查探到别人的服务、空库备份必然失败、ld.sh 不认 COMPOSE_FILE、
+// nginx 丢端口与不压缩、preflight 假警报。
 //
 // 必须是 var：发布流程用 `-ldflags -X` 把镜像标签注入进来，而链接器**只覆盖字符串
 // var**，对 const 静默忽略。写成 const 时打出来的镜像，`/api/health.version` 永远是
 // 源码里的字面量 —— 回滚时无法确认"跑的是哪个 tag"，发布也就不可追溯。
-var Version = "v2.1.3"
+var Version = "v2.1.4"
 
 var startTime = time.Now()
 
