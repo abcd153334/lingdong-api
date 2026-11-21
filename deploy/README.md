@@ -11,13 +11,18 @@ bash deploy/ld.sh up
 ```
 
 看到 `PASS 深探通过` 就完成了。打开 `http://127.0.0.1:8088`，
-初始管理员口令在首次启动日志里（只会打印这一次）：
+初始管理员口令会被自动存到 `~/.lingdong-admin-initial`（600，用户名 `admin`）。
+它只在**首次建号**时生成一次；日志里也有一份，但很容易被构建输出刷走：
 
 ```bash
-docker compose -f deploy/docker-compose.yml logs backend | grep 初始口令
+cat ~/.lingdong-admin-initial
+docker compose -f deploy/docker-compose.yml logs backend | grep 初始口令   # 备查
 ```
 
 想自己定初始口令：部署前 `export LD_BOOTSTRAP_ADMIN_PASSWORD='...'`（只在**首次创建**时生效）。
+
+版本号不用手写：`ld.sh up` 会读当前 checkout 的 tag 注入二进制，`/api/health` 的
+`version` 与 tag 一致；不带 tag 的 checkout（如直接下压缩包）才会落在 `dev`。
 
 > 生产环境请务必在它前面加一层 TLS（见 §4）。`APP_ENV=prod` 下会话 Cookie 默认按请求协议
 > 决定是否带 `Secure`，所以明文入口**能**登录；但会话票据会以明文过链路，只适合首次验证。

@@ -43,21 +43,33 @@ case "${1-}" in
     done
     # 没有 .env 就先造一个：3 个密钥自动生成，用户不需要手填任何值。
     bash "$DIR/scripts/init-env.sh"
+    # 版本号：环境里给了 TAG 就用它，否则取当前 checkout 的**精确 tag**。
+    # 为什么必须做这一步：VERSION 经 -ldflags -X 注入二进制，/api/health.version
+    # 是「跑的是哪一版」的唯一判据。clone 到 tag 是标准部署姿势，若这里不推导，
+    # 发布出来的实例一律报 dev —— 回滚后没人分得清在跑什么。
+    if [ -z "${TAG:-}" ]; then
+      TAG="$(git -C "$DIR/.." describe --tags --exact-match 2>/dev/null || true)"
+      if [ -n "$TAG" ]; then
+        export TAG
+        echo "版本：$TAG（取自当前 checkout 的 tag）"
+      fi
+    fi
     if [ "$pull" = "1" ]; then
       # --pull 拉预构建镜像（几十秒）。拉不到就**自动退回本地构建**：
       # 国内服务器访问 ghcr.io 时通时不通，在这里硬失败等于把用户堵在门外。
-      if ! ( cd "$DIR" && docker compose -f "$COMPOSE_FILE" pull backend ); then
+      if ( cd "$DIR" && docker compose -f "$COMPOSE_FILE" pull backend ); then
+        ( cd "$DIR" && docker compose -f "$COMPOSE_FILE" up -d "${args[@]}" )
+      else
         echo "⚠ 拉取预构建镜像失败（网络或仓库权限），改用本地构建" >&2
         ( cd "$DIR" && docker compose -f "$COMPOSE_FILE" up -d --build "${args[@]}" )
-        bash "$DIR/scripts/healthcheck.sh" --wait 180
-        exit $?
       fi
-      ( cd "$DIR" && docker compose -f "$COMPOSE_FILE" up -d "${args[@]}" )
     else
       # 默认构建：验的是"这份 checkout 能不能跑"。镜像已存在时 Docker 会复用层缓存。
       ( cd "$DIR" && docker compose -f "$COMPOSE_FILE" up -d --build "${args[@]}" )
     fi
     bash "$DIR/scripts/healthcheck.sh" --wait 180
+    # 首启口令单行打印，很容易被构建日志刷走；落到 ~/.lingdong-admin-initial（600）。
+    bash "$DIR/scripts/capture-initial-admin.sh" || true
     ;;
   init)        bash "$DIR/scripts/init-env.sh" ;;
   down)
