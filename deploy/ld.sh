@@ -44,7 +44,14 @@ case "${1-}" in
     # 没有 .env 就先造一个：3 个密钥自动生成，用户不需要手填任何值。
     bash "$DIR/scripts/init-env.sh"
     if [ "$pull" = "1" ]; then
-      ( cd "$DIR" && docker compose -f "$COMPOSE_FILE" pull )
+      # --pull 拉预构建镜像（几十秒）。拉不到就**自动退回本地构建**：
+      # 国内服务器访问 ghcr.io 时通时不通，在这里硬失败等于把用户堵在门外。
+      if ! ( cd "$DIR" && docker compose -f "$COMPOSE_FILE" pull backend ); then
+        echo "⚠ 拉取预构建镜像失败（网络或仓库权限），改用本地构建" >&2
+        ( cd "$DIR" && docker compose -f "$COMPOSE_FILE" up -d --build "${args[@]}" )
+        bash "$DIR/scripts/healthcheck.sh" --wait 180
+        exit $?
+      fi
       ( cd "$DIR" && docker compose -f "$COMPOSE_FILE" up -d "${args[@]}" )
     else
       # 默认构建：验的是"这份 checkout 能不能跑"。镜像已存在时 Docker 会复用层缓存。
