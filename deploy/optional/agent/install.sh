@@ -83,14 +83,18 @@ WantedBy=multi-user.target
 EOF
 
 systemctl daemon-reload
-systemctl enable --now ld-updater
+systemctl enable ld-updater
+# 必须 restart 而不是 `enable --now`：服务已经在跑时，`start` 是 no-op，
+# 文件换了、进程还是旧代码 —— 症状是"重装了、修复没生效"，且看不出任何异常。
+# `restart` 对未运行的服务等价于 `start`，两种情况都对。
+systemctl restart ld-updater
 sleep 2
 systemctl --no-pager --lines=8 status ld-updater || true
 
 cat <<EOF
 
 安装完成：
-  运行副本  $APP_DIR/ld-updater.sh   （仓库里的改动需要重新跑本脚本才生效）
+  运行副本  $APP_DIR/ld-updater.sh   （已重启生效；仓库里的改动需要重新跑本脚本）
   配置      $CONF
   日志      journalctl -u ld-updater -f
   自检      bash $APP_DIR/ld-updater.sh --dry-run --tag v0.0.0

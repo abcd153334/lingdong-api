@@ -90,10 +90,29 @@ bash /opt/lingdong/updater/ld-updater.sh --dry-run --tag v2.2.0   # 只打印命
 
 ## 升级 agent 自身
 
-`install.sh` 只复制脚本，不重装服务：
+agent 的运行副本在 `/opt/lingdong/updater`，**升级应用不会升级它** —— 所以 agent 里的
+bug 修复不重装就永远不生效。重装就一条命令（在部署目录下）：
 
 ```bash
-sudo bash /opt/lingdong/app/deploy/optional/agent/install.sh --repo /opt/lingdong/app
+sudo bash deploy/ld.sh updater
 ```
+
+它会重写运行副本、重写 unit、`daemon-reload`，然后 **restart**（不是 `enable --now`：
+服务已在跑时 `start` 是 no-op，文件换了进程还是旧代码，症状是"重装了没效果"）。
+
+判断有没有生效，两个办法：
+
+```bash
+sha256sum deploy/optional/agent/ld-updater.sh /opt/lingdong/updater/ld-updater.sh  # 应相同
+systemctl show -p ActiveEnterTimestamp ld-updater --value                          # 应是刚才
+```
+
+agent 启动时会自己做一次同样的对比，不一致就打一行：
+
+```
+WARN 更新程序与仓库版本不一致：执行 sudo bash deploy/ld.sh updater 让它生效
+```
+
+所以升级应用之后，如果 `journalctl -u ld-updater` 里出现这行，就是该重装了。
 
 注意这是**人工**动作：agent 不会更新自己（它正在执行更新）。

@@ -539,6 +539,26 @@ check_self_outdated() {
   fi
 }
 
+# self_heal 在**跑完一次更新之后**把自己换成仓库里的新版本。
+#
+# 更新过程会 checkout 到目标 tag，仓库里的 ld-updater.sh 也跟着变成新版本了，
+# 但正在跑的是启动时读进内存的旧代码。此时直接 exec 新脚本，就让 agent 的修复
+# 跟着应用更新一起生效 —— 不必等人工重装（绝大多数人不会去看 journalctl 的 WARN）。
+#
+# 两道保险：新脚本先 `bash -n` 过一遍语法（坏脚本 exec 进去会变成 systemd 无限
+# 重启循环，因为运行副本已被覆盖），复制失败就继续用旧脚本（旧的至少能跑）。
+self_heal() {
+  local src="$REPO_PATH/deploy/optional/agent/ld-updater.sh"
+  [ -f "$src" ] || return 0
+  command -v sha256sum >/dev/null 2>&1 || return 0
+  [ "$(sha256sum "$src" | cut -d' ' -f1)" = "$(sha256sum "$0" | cut -d' ' -f1)" ] && return 0
+  bash -n "$src" 2>/dev/null || { warn "仓库里的更新程序语法不通过，保留当前版本"; return 0; }
+  log "更新程序自身有新版本，同步后重启"
+  install -m 0755 "$src" "$0" || { warn "自同步失败，继续使用当前版本"; return 0; }
+  # exec 替换进程映像：fd 9 上的 flock 仍属于本进程，重启后的 flock -n 9 依然成功。
+  exec "$0"
+}
+
 main() {
   [ "$DRY" = "1" ] && { dry_run_plan; exit 0; }
 
@@ -591,6 +611,8 @@ main() {
     do_job
     stop_heartbeat
     log "任务 #$JOB_ID 结束"
+    # 刚跑完的这次更新已经把工作区 checkout 到新 tag，仓库里的 agent 可能也新了。
+    self_heal
   done
 }
 
