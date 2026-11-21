@@ -119,13 +119,23 @@ app_image() { printf '%s:%s' "$(app_repo)" "${1:-latest}"; }
 # 它会跟着结果一起进 stdout。少了它，claim 在"没有任务"时拿到的不是空串，
 # 而是字符串 "UPDATE 0" —— 被当成一条 id 叫 UPDATE 0 的任务，每 5 秒报一次
 # `invalid input syntax for type bigint`。
+# 字段分隔符必须用 '|'，**不能用 tab**。
+#
+# bash 的 `read` 对 IFS 里的**空白字符**（空格 / tab / 换行）会合并连续分隔符
+# 并且丢弃首尾空字段 —— 而 `read -r a b c d` 遇到 "1\tv2.2.9\t\trid"（第三列为空）
+# 会读成 a=1 b=v2.2.9 c=rid d=''，整列左移。
+# 症状：commit 校验拿 request_id 去比 commit，报 `commit_mismatch`
+# "tag 指向的提交与清单声明不一致"，而库里 target_commit 明明是空的。
+# '|' 不是空白字符，空字段会被保留。
+#
+# psql 也不认 `$'\t'` 这种写法（sh 下会当成字面量 $\t），用 '|' 顺便把这个坑也绕开。
 db() {
   local sql="$1"; shift
   ( cd "$REPO_PATH/deploy" && \
     printf '%s\n' "$sql" | docker compose -f "$(basename "$COMPOSE_FILE")" exec -T \
       -e PGPASSWORD="$PG_PASS" postgres \
       psql -U "$PG_USER" -d "$PG_DB" --quiet --no-psqlrc --no-align --tuples-only \
-           --field-separator=$'\t' "$@" )
+           --field-separator='|' "$@" )
 }
 
 load_db_conf() {
@@ -549,7 +559,14 @@ main() {
     fi
 
     JOB_ID=""; TARGET_TAG=""; TARGET_COMMIT=""; REQUEST_ID=""
-    IFS=$'\t' read -r JOB_ID TARGET_TAG TARGET_COMMIT REQUEST_ID <<< "$row"
+    # IFS 必须是 '|'（与 db 的 --field-separator 一致）。用 tab 会因为
+    # "空白分隔符合并空字段" 把 TARGET_COMMIT 读成 request_id —— 见 db() 上的注释。
+    IFS='|' read -r JOB_ID TARGET_TAG TARGET_COMMIT REQUEST_ID <<< "$row"
+    if [ -z "$JOB_ID" ] || [ -z "$TARGET_TAG" ]; then
+      warn "任务行格式异常（字段不足 4 列）：$row"
+      sleep "$INTERVAL"
+      continue
+    fi
     log "领取任务 #$JOB_ID → $TARGET_TAG"
     start_heartbeat
     # 刻意**不**写成 `if ! do_job`：那会让 do_job 内部的所有命令失去 set -e
