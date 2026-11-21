@@ -590,7 +590,7 @@ export function AdminConfigPage() {
                 </Card>
                 <Card
                   title="版本与更新"
-                  sub="发布清单地址：管理台据此判断有没有新版本；留空则不检查"
+                  sub="发布清单地址：管理台据此判断有没有新版本；留空 = 用官方清单，填 off = 关闭检查"
                 >
                   <Field
                     label="发布清单地址"
@@ -598,7 +598,7 @@ export function AdminConfigPage() {
                   >
                     <Input
                       value={form.release_manifest_url ?? ""}
-                      placeholder="https://example.com/release.json（留空 = 不检查）"
+                      placeholder="留空 = 官方发布清单；off = 关闭自动检查"
                       onChange={(e) => patch((f) => ({ ...f, release_manifest_url: e.target.value }))}
                     />
                   </Field>

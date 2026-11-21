@@ -26,7 +26,8 @@ usage() {
   backup [参数]     备份（转给 scripts/backup.sh）
   restore <参数>    恢复（转给 scripts/restore.sh）
   upgrade <TAG>     切换版本（转给 scripts/upgrade.sh）
-  tag <TAG>         构建并记录发布（转给 scripts/tag-release.sh）
+  tag <TAG> [--pull]  构建并记录发布（转给 scripts/tag-release.sh）
+  updater [install|uninstall]  装/卸宿主机一键更新程序（需要 root）
   config            校验编排文件
 EOF
 }
@@ -90,6 +91,19 @@ case "${1-}" in
   restore)     bash "$DIR/scripts/restore.sh" "${@:2}" ;;
   upgrade)     bash "$DIR/scripts/upgrade.sh" "${@:2}" ;;
   tag)         bash "$DIR/scripts/tag-release.sh" "${@:2}" ;;
+  # 一键更新的执行者住在宿主机（要 git + docker 控制权），不在容器里也不在仓库里。
+  # 这里只负责把 --repo 填对：install.sh 的默认值是 /opt/lingdong/app，
+  # 而实际部署目录是 /opt/lingdong-api/app —— 让人记路径就是让人答错。
+  updater)
+    shift
+    repo="$(cd "$DIR/.." && pwd)"
+    case "${1-}" in
+      uninstall) bash "$DIR/optional/agent/install.sh" --uninstall ;;
+      ""|install) bash "$DIR/optional/agent/install.sh" --repo "$repo" ;;
+      # 其余参数原样透传（--interval 等）；用户自己给 --repo 会覆盖前面那个。
+      *) bash "$DIR/optional/agent/install.sh" --repo "$repo" "$@" ;;
+    esac
+    ;;
   config)
     ( cd "$DIR" && docker compose -f "$COMPOSE_FILE" config -q && echo "compose OK" )
     ;;

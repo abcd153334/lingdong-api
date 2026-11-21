@@ -32,5 +32,9 @@ func Jobs() []Job {
 		NewAgentDryRunCleanupJob(),
 		// 认证数据回收：过期会话 / 超保留期的认证事件 / 用过的备份码。
 		NewAuthCleanupJob(),
+		// 自动检查新版本（6h 一次，只写出站抓清单，不做更新动作）。
+		// 没有它，"有没有新版本"就只取决于管理员有没有点过「检查更新」——
+		// 而进程内缓存在重启后是空的，侧栏红点永远不会自己出现。
+		NewReleaseCheckJob(),
 	}
 }

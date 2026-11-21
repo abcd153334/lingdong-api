@@ -15,10 +15,15 @@ shift 2>/dev/null || true
 DO_BACKUP=1
 DO_PREFLIGHT=1
 APP_ONLY=0
+# 期望版本号默认等于 TAG。回滚时必须能分开：回退镜像的 tag 是 revert-<job>，
+# 而它跑出来的 /api/health.version 是 PREV_TAG（v2.2.6）。以前两者绑死，
+# 结果是"回滚切换成功、健康校验必失败"——回滚成了必然报错的一条路。
+EXPECT_VER=""
 while [ $# -gt 0 ]; do
   case "$1" in
     --no-backup) DO_BACKUP=0; shift ;;
     --no-preflight) DO_PREFLIGHT=0; shift ;;
+    --expect-version) EXPECT_VER="${2-}"; shift 2 ;;
     # 只切应用容器：`up -d` 不带服务名会重新评估 postgres/redis。
     # 新 tag 一旦改动了这两个服务的编排段落（加环境变量、换镜像），
     # docker 就会**重建数据库容器** —— 在有连接的情况下重建 PG 是纯风险，
@@ -27,6 +32,7 @@ while [ $# -gt 0 ]; do
     *) die "未知参数：$1" ;;
   esac
 done
+EXPECT_VER="${EXPECT_VER:-$TAG_ARG}"
 
 [ -n "$TAG_ARG" ] || die "用法：bash deploy/scripts/upgrade.sh <TAG>（TAG 由 tag-release.sh 产出）"
 case "$TAG_ARG" in
@@ -79,7 +85,7 @@ log "等待健康（最多 120s）"
 #   - 不带 --expect-version：`up -d` 没真正换掉镜像（或被同名旧镜像顶替）时旧进程照样 200，
 #     于是「已切到 vX」是个谎；真机上 v2.1.2 后端一直在崩溃重启，检查却报 PASS；
 #   - 不带 --require-db：把「能返回 200」当成「DB 真能用」。
-if bash "$SCRIPT_DIR/healthcheck.sh" --wait 120 --expect-version "$TAG_ARG" --require-db; then
+if bash "$SCRIPT_DIR/healthcheck.sh" --wait 120 --expect-version "$EXPECT_VER" --require-db; then
   ok "已切到 $TAG_ARG"
 else
   warn "新版本未通过健康检查"

@@ -391,8 +391,11 @@ func seedSystemConfig(gdb *gorm.DB) error {
 		})},
 		{Key: "about_content", Value: model.MustJSON("灵动 API 是面向开发者的多模态模型接入网关，提供对话、图像、音频、视频等全模态模型的统一 API。\n\n我们通过统一的 OpenAI 兼容接口接入多家模型供应商，按实际用量计费，价格透明、账单可查，支持余额充值与兑换码。\n\n如需商务合作或大额采购，请联系 support@example.com。")},
 		{Key: "agreement_content", Value: model.MustJSON("一、服务说明：灵动 API（以下简称「本服务」）为开发者提供模型调用网关服务。注册即视为已阅读并同意本协议。\n\n二、账号与安全：用户应妥善保管账户与 API KEY，因保管不善造成的损失由用户承担。禁止利用本服务从事违法违规用途。\n\n三、计费与退款：按实际调用量计费，充值余额不支持提现；因系统原因导致的错误计费将予以退回。\n\n四、免责条款：模型输出内容不构成平台立场，平台对生成内容不承担审核义务。本协议最终解释权归平台所有。\n\n生效日期：2026-10-01")},
-		// 发布清单地址（一键更新的"有没有新版本"来源）。默认空 = 不检查，
-		// 由管理员在「系统配置 → 通用」里填；地址变了缓存自然失效（缓存键就是它）。
+		// 发布清单地址（一键更新的"有没有新版本"来源）。
+		// **空串 = 用出厂默认清单**（releasecheck.DefaultManifestURL，官方发布清单），
+		// 填 off = 关闭自动检查，填别的 = 覆盖（fork 后跟自己的发布）。
+		// 兜底逻辑在 releasecheck.ManifestURL 里，不在这里写第二份默认值 ——
+		// 两处默认值迟早会不一致，而症状是"新库能查、老库不能查"。
 		{Key: "release_manifest_url", Value: model.MustJSON("")},
 		{Key: "modality_defaults", Value: model.MustJSON(map[string]any{
 			"chat": "gpt-4o", "image": "gpt-image-1", "audio": "tts-1-hd", "video": "kling-v2-master",

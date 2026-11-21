@@ -159,6 +159,8 @@ bash deploy/scripts/restore.sh deploy/backups/<时间戳>/xxx.dump \
 镜像标签即版本。`/api/health` 的 `version` 必须等于标签（构建时用 `-X` 注入），
 否则「回滚后跑的是哪一版」又变成靠猜。
 
+### A. 命令行（适合脚本与无人值守）
+
 ```bash
 # 用发布镜像升级 / 回滚（推荐）：本地没有该 tag 会自动拉，拉不到会明确报错且不做任何变更
 bash deploy/scripts/upgrade.sh <TAG> --app-only
@@ -173,6 +175,47 @@ bash deploy/scripts/upgrade.sh <TAG> --app-only
 
 回滚：`bash deploy/scripts/upgrade.sh <上一版> --app-only`。
 若这一步提示 `data_epoch` 变了（跑过数据迁移），只回退镜像不够，必须连带恢复备份。
+
+### B. 管理台一键更新（先装一次执行器）
+
+装一次就够了，之后在管理台点按钮：
+
+```bash
+sudo bash deploy/ld.sh updater              # 装（自动带上当前部署目录，不用记路径）
+sudo bash deploy/ld.sh updater uninstall    # 卸（任务表与备份不受影响）
+```
+
+侧栏底部点版本号 → 「版本与更新」。「立即更新」能不能点由后端判定，
+灰着时弹窗会直接写原因：清单没配 / 执行器离线 / 已是最新 / 有任务在跑 / 版本号不可比。
+
+执行器的执行序列（失败自动回滚）：
+
+```
+fetch → 校验 tag → 查脏工作区 → 记回退镜像 → 磁盘检查
+→ checkout → 体检 → 准备镜像（优先拉预构建，拉不到才本地构建）
+→ 备份 → 只切应用容器 → 核对版本 + 深探 DB → 比对 data_epoch
+```
+
+**发布清单**是"有没有新版本"的唯一来源。出厂默认指向官方清单，所以克隆部署的实例
+开箱即可检查更新；fork 后想跟自己的发布，在「系统配置 → 版本与更新」里换地址，
+填 `off` 则彻底关闭（连自动检查也不出站）。
+
+### C. 发一个版本（开发者）
+
+```bash
+git tag v2.2.8 && git push origin v2.2.8
+```
+
+推 `v*` 标签会触发一次构建，同时产出两样东西：
+
+| 产物 | 位置 |
+|---|---|
+| 镜像 | `ghcr.io/abcd153334/lingdong-api:v2.2.8` + `:latest`（amd64/arm64） |
+| 清单 | `raw.githubusercontent.com/abcd153334/lingdong-api/release-manifest/release.json` |
+
+**不要再手工跑 `gen-release-manifest.sh` 上传**：那是离线 / 自建发布渠道才需要的。
+清单里 `commit` 与镜像的 `VERSION` 都取自同一个 tag，所以"清单说有新版"与
+"拉到的镜像版本号"天然一致。
 
 ---
 
@@ -206,6 +249,22 @@ curl -sS http://127.0.0.1:8088/api/health?deep=1
 口令存的是 bcrypt，从库里读不出原文。库还在就新建一个管理员重置（或从上一次备份恢复）；
 `down -v` 重建过库的话，下个启动会重新建 admin，又是 `admin123`。
 
+**「立即更新」按钮灰着？**
+按钮能不能点由后端判定，弹窗会写原因，按原因处理：
+
+| `blocked_reason` | 怎么办 |
+|---|---|
+| `not_configured` | 清单地址被设成了 `off`（留空即用官方清单） |
+| `agent_offline` | 执行器没装或没起：`sudo bash deploy/ld.sh updater`，再 `systemctl status ld-updater` |
+| `no_update` | 真的是最新版（`update_available=false`） |
+| `manifest_error` | 抓不到清单：看 `error_kind`（`blocked` = 非 https/内网、`http_status` = 404 或重定向、`timeout` = 出站被拦） |
+| `already_running` | 有一个任务在跑；排队中的可以取消，执行中的不行 |
+
+**一键更新中途失败，站点是好的吗？**
+是。更新只在最后一步切容器，之前任何一步失败都会把检出恢复原样、容器与库都没动。
+切换后校验不过会自动回滚到上一版镜像；若期间跑过数据迁移（`data_epoch` 变了）则不自动回滚，
+而是转 `manual_required` 并提示必须连带恢复备份 —— 因为那是"旧代码配新数据"。
+
 **能不能多机部署？**
 可以，但那是可选组件：[`deploy/optional/cluster/`](optional/cluster/docker-compose.node.yml)
 （多节点共用一个库与一个 Redis，见 §3 关于 `APP_ENCRYPTION_KEY` 必须同值的说明）。
@@ -225,12 +284,13 @@ deploy/
     healthcheck.sh         浅探 + 深探 + 版本核对
     backup.sh restore.sh   备份与恢复（9 项账务指纹）
     upgrade.sh             体检 → 备份 → 切版本 → 核对
-    tag-release.sh         构建并记账
+    tag-release.sh         准备镜像（--pull 优先拉）+ 记账到 .release
     preflight.sh           部署前体检（可选）
+    gen-release-manifest.sh  手工生成发布清单（只在离线 / 自建发布渠道时需要）
   edge/                    两种正式入口的模板（宝塔 / 独立 nginx）
   optional/                agent（管理台一键更新）、cluster（多机）—— 单机不需要
 ```
 
 发布镜像由 GitHub Actions 在打 tag 时构建并推送到
-`ghcr.io/abcd153334/lingdong-api`（amd64 + arm64），见
-[`.github/workflows/docker.yml`](../.github/workflows/docker.yml)。
+`ghcr.io/abcd153334/lingdong-api`（amd64 + arm64），**同一次构建还会把发布清单
+推到 `release-manifest` 分支**，见 [`.github/workflows/docker.yml`](../.github/workflows/docker.yml)。

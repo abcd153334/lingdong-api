@@ -21,8 +21,10 @@ import (
 // releaseChecker 是版本检查的唯一实例（进程内 15s 冷却 + 进程内缓存）。
 //
 // 只有一个实例是**必须**的：如果每个请求 new 一个，冷却与缓存都失效，
-// "点一下检查"就变成"对第三方站点发一次请求"。
-var releaseChecker = releasecheck.New()
+// "点一下检查"就变成"对第三方站点发一次请求"。实例本身由 releasecheck 包持有，
+// 因为后台定时任务（worker/release_check.go）也要往同一个缓存里写 ——
+// 两边各持一份的话，定时任务抓到的"有新版本"在管理台上看不见。
+var releaseChecker = releasecheck.Shared()
 
 // requestIDRe 是前端一次性请求 ID 的形状（UUID 或同等随机串）。
 var requestIDRe = regexp.MustCompile(`^[A-Za-z0-9_-]{8,64}$`)

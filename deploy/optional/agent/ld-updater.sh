@@ -82,6 +82,30 @@ read_env() {
   printf '%s' "$line"
 }
 
+# 镜像名必须与 deploy/scripts/lib/common.sh:app_image 同规则，但**不能 source** 它
+# （见文件头：仓库文件会随版本变，而正在跑的 agent 是旧版）。代价是这里内联一份。
+#
+# 这一份是 v2.2.0 改形态时漏掉的：前端内嵌后 web 容器被删、镜像统一成
+# ghcr.io/<owner>/lingdong-api:<tag>，而本脚本还在找 lingdong-api-backend /
+# lingdong-api-web。症状不是"更新失败"，是第 4 步就 rollback_unavailable 退出 ——
+# 一次更新都跑不成，且看起来像"回退镜像被清理了"。
+APP_IMAGE_REPO="ghcr.io/abcd153334/lingdong-api"
+
+app_repo() {
+  local explicit
+  explicit="$(read_env LD_IMAGE '')"
+  if [ -n "$explicit" ]; then
+    case "$explicit" in
+      *:*) printf '%s' "${explicit%:*}" ;;
+      *)   printf '%s' "$explicit" ;;
+    esac
+    return 0
+  fi
+  printf '%s' "$APP_IMAGE_REPO"
+}
+
+app_image() { printf '%s:%s' "$(app_repo)" "${1:-latest}"; }
+
 # db：执行一条 SQL，返回制表符分隔的行。
 # 走容器内的 psql：宿主机不需要装客户端（生产宿主机通常只有 Docker）。
 db() {
@@ -282,12 +306,12 @@ do_job() {
     return
   fi
 
-  # 4) 记回退点：切换前一秒才知道要回退到哪，就已经晚了
+  # 4) 记回退点：切换前一秒才知道要回退到哪，就已经晚了。
+  #    记的是**镜像 ID**（tag 可被覆盖，ID 不会），并在回退时按 ID 重新 tag 一份。
   PREV_COMMIT="$(git -C "$REPO_PATH" rev-parse HEAD)"
-  local prev_backend prev_web epoch_before
+  local prev_backend epoch_before
   PREV_TAG="$(release_field version)"
-  prev_backend="$(docker image inspect -f '{{.Id}}' "lingdong-api-backend:${PREV_TAG:-none}" 2>/dev/null || true)"
-  prev_web="$(docker image inspect -f '{{.Id}}' "lingdong-api-web:${PREV_TAG:-none}" 2>/dev/null || true)"
+  prev_backend="$(docker image inspect -f '{{.Id}}' "$(app_image "${PREV_TAG:-none}")" 2>/dev/null || true)"
   epoch_before="$(data_epoch)"
   if [ -z "$prev_backend" ] || [ -z "$epoch_before" ]; then
     finish FAIL rollback_unavailable "无法确定回退目标（缺上一版镜像或读不到数据库），为避免无路可退，本次不切换"
@@ -321,16 +345,18 @@ do_job() {
     return
   fi
 
-  # 8) 构建（唯一构建入口；失败时容器与数据库都没动）
-  note building build 20 "构建镜像（约 3–8 分钟，服务正常）"
+  # 8) 准备镜像：**优先拉预构建镜像**（几十秒），拉不到才本地构建（3–8 分钟）。
+  #    只走 tag-release.sh 一个入口 —— 它同时负责写 .release（version/commit/
+  #    image_id/data_epoch/previous）。在这里另写一份记账 = 两套真相。
+  note building build 20 "准备镜像（优先拉预构建，几十秒；否则本地构建 3–8 分钟）"
   RELEASE_BAK="$(mktemp)"
   [ -f "$REPO_PATH/deploy/.release" ] && cp -f "$REPO_PATH/deploy/.release" "$RELEASE_BAK" || true
   RELEASE_WRITTEN=1
-  if ! run bash "$REPO_PATH/deploy/scripts/tag-release.sh" "$TARGET_TAG"; then
-    fail_pre_switch build_failed "构建失败，已恢复原检出"
+  if ! run bash "$REPO_PATH/deploy/scripts/tag-release.sh" "$TARGET_TAG" --pull; then
+    fail_pre_switch build_failed "镜像准备失败（拉取与本地构建都失败），已恢复原检出"
     return
   fi
-  note building built 60 "构建完成"
+  note building built 60 "镜像已就绪"
 
   # 9) 备份（放在构建之后：先备份会让备份比切换早 8 分钟，这段时间账还在动）
   note backing_up backup 65 "备份数据库"
@@ -384,18 +410,25 @@ rollback() {
     return
   fi
 
-  local rb_tag="revert-$JOB_ID"
-  if ! docker image inspect "lingdong-api-backend:$rb_tag" >/dev/null 2>&1; then
+  # 回退镜像：优先用"上一版 tag"（镜像通常还在，prune 保留最近 4 个）；
+  # 不在了就按第 4 步记下的镜像 ID 重新 tag 一份。
+  # 两个名字都必须由 app_image 推导 —— 旧实现写死 lingdong-api-backend 与
+  # lingdong-api-web，在 v2.2.0 之后就再也找不到镜像，回滚必然 rollback_unavailable。
+  local rb_tag="$PREV_TAG" rb_ver="$PREV_TAG"
+  if [ -z "$rb_tag" ] || ! docker image inspect "$(app_image "$rb_tag")" >/dev/null 2>&1; then
+    rb_tag="revert-$JOB_ID"
     docker tag "$(db "select coalesce(rollback_ref,'') from release_update_jobs where id=:'id'" -v id="$JOB_ID" | tr -d '\r')" \
-      "lingdong-api-backend:$rb_tag" 2>/dev/null || true
-    docker tag "lingdong-api-web:${PREV_TAG:-none}" "lingdong-api-web:$rb_tag" 2>/dev/null || true
+      "$(app_image "$rb_tag")" 2>/dev/null || true
   fi
-  if ! docker image inspect "lingdong-api-backend:$rb_tag" >/dev/null 2>&1; then
+  if ! docker image inspect "$(app_image "$rb_tag")" >/dev/null 2>&1; then
     finish MANUAL rollback_unavailable "$msg；回退镜像已被清理，无法自动回滚" "failed"
     return
   fi
 
-  if ! bash "$REPO_PATH/deploy/scripts/upgrade.sh" "$rb_tag" --app-only --no-backup --no-preflight; then
+  # --expect-version 必须传上一版的版本号：rb_tag 在 fallback 分支里是 revert-<id>，
+  # 拿它当期望版本会让健康校验永远不通过（而那时切换其实已经成功了）。
+  if ! bash "$REPO_PATH/deploy/scripts/upgrade.sh" "$rb_tag" \
+        --expect-version "$rb_ver" --app-only --no-backup --no-preflight; then
     finish MANUAL rollback_failed "$msg；回滚切换也失败，请立即人工介入" "failed"
     return
   fi
@@ -411,19 +444,18 @@ rollback() {
 # 而发布镜像都带 tag，永远不会被它删 —— 磁盘会一路涨到构建失败。
 prune_images() {
   local cur="$1" prev="$2" repo tag
-  for repo in lingdong-api-backend lingdong-api-web; do
-    # 按创建时间倒序，只保留最近 4 个（当前 + 上一版 + 2 个余量）。
-    # 不用 `docker image prune --filter until=24h`：它只删 dangling 镜像，
-    # 发布镜像都带 tag，永远不会被它删掉 —— 磁盘会一路涨到构建失败。
-    while read -r tag; do
-      [ -n "$tag" ] || continue
-      case "$tag" in
-        "<none>"|"$cur"|"$prev") continue ;;
-      esac
-      docker rmi "$repo:$tag" >/dev/null 2>&1 || true
-    done < <(docker images --format '{{.CreatedAt}}|{{.Tag}}' "$repo" 2>/dev/null \
-               | sort -r | awk -F'|' 'NR>4{print $2}')
-  done
+  repo="$(app_repo)"
+  # 按创建时间倒序，只保留最近 4 个（当前 + 上一版 + 2 个余量）。
+  # 不用 `docker image prune --filter until=24h`：它只删 dangling 镜像，
+  # 发布镜像都带 tag，永远不会被它删掉 —— 磁盘会一路涨到构建失败。
+  while read -r tag; do
+    [ -n "$tag" ] || continue
+    case "$tag" in
+      "<none>"|"$cur"|"$prev") continue ;;
+    esac
+    docker rmi "$repo:$tag" >/dev/null 2>&1 || true
+  done < <(docker images --format '{{.CreatedAt}}|{{.Tag}}' "$repo" 2>/dev/null \
+             | sort -r | awk -F'|' 'NR>4{print $2}')
   docker image prune -f >/dev/null 2>&1 || true
 }
 
@@ -443,7 +475,7 @@ DRY-RUN：将按以下顺序执行（不碰数据库、不碰容器）
   5  df \$(docker info --format '{{.DockerRootDir}}')  （≥12GB）
   6  git checkout --detach refs/tags/<tag>
   7  bash deploy/scripts/preflight.sh
-  8  bash deploy/scripts/tag-release.sh <tag>
+  8  bash deploy/scripts/tag-release.sh <tag> --pull   （先拉预构建，拉不到再构建）
   9  bash deploy/scripts/backup.sh --out deploy/backups
  10  bash deploy/scripts/upgrade.sh <tag> --app-only --no-backup --no-preflight
  11  bash deploy/scripts/healthcheck.sh --wait 120 --expect-version <tag> --require-db

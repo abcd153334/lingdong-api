@@ -15,6 +15,9 @@ on:
       tag:
         description: "镜像标签（默认取当前 ref 名）"
         required: false
+      notes:
+        description: "发布说明（默认取 commit 标题）"
+        required: false
 
 permissions:
   contents: read
@@ -62,6 +65,71 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
+      # 清单是管理台「版本与更新」的唯一数据源。在这里生成而不是让发布者手工跑
+      # gen-release-manifest.sh，是因为手工那一步有 3 个动作（生成 / 上传 / 在管理台
+      # 填地址），漏一个的症状是"发版了但没人收到通知"，而且很难自查。
+      #
+      # 托管位置选**固定分支的 raw 地址**而不是 release asset：
+      # 后端抓清单的 http client 禁重定向（netguard.DenyRedirect），而
+      # github.com/.../releases/latest/download/... 是 302 —— 会被判 http_status 拒绝。
+      # raw.githubusercontent.com/<repo>/release-manifest/release.json 实测直出 200、零重定向。
+      - name: 生成发布清单
+        run: |
+          TAG="${{ steps.meta.outputs.tag }}"
+          NOTES="${{ inputs.notes }}"
+          [ -n "$NOTES" ] || NOTES="$(git log -1 --pretty=%s)"
+          # 手写 JSON 时最容易出的事是引号/换行没转义，用 python 生成而不是拼字符串。
+          TAG="$TAG" NOTES="$NOTES" COMMIT="$GITHUB_SHA" \
+          REPO="${{ github.repository }}" python3 - <<'PY'
+          import json, os, datetime
+          tag = os.environ["TAG"]
+          doc = {
+              "schema": 1,
+              "latest": {
+                  "version": tag,
+                  "tag": tag,
+                  "published_at": datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%d"),
+                  "notes": os.environ["NOTES"][:500],
+                  "commit": os.environ["COMMIT"],
+                  "url": f"https://github.com/{os.environ['REPO']}/releases/tag/{tag}",
+              },
+          }
+          with open("release.json", "w", encoding="utf-8") as f:
+              json.dump(doc, f, ensure_ascii=False, indent=2)
+              f.write("\n")
+          print(open("release.json", encoding="utf-8").read())
+          PY
+
+      # 单文件分支：只放 release.json（+ 一句来源说明）。用独立临时仓库推送，
+      # 不动本 job 的 checkout —— 那是构建上下文，改它的 HEAD 会让缓存键漂移。
+      - name: 推送清单到 release-manifest 分支
+        run: |
+          TAG="${{ steps.meta.outputs.tag }}"
+          set -euo pipefail
+          mkdir -p /tmp/manifest && cp release.json /tmp/manifest/
+          cd /tmp/manifest
+          cat > README.md <<'MD'
+          # 发布清单（自动生成）
+
+          本分支只放 `release.json`，由 `.github/workflows/docker.yml` 在每次推 `v*` tag 时更新。
+          请勿手工修改 —— 下一次发布会覆盖。
+
+          清单地址（管理台「系统配置 → 版本与更新」填这个）：
+          `https://raw.githubusercontent.com/abcd153334/lingdong-api/release-manifest/release.json`
+          MD
+          git init -q -b release-manifest
+          git -c user.name="github-actions[bot]" \
+              -c user.email="41898282+github-actions[bot]@users.noreply.github.com" \
+              add release.json README.md
+          git -c user.name="github-actions[bot]" \
+              -c user.email="41898282+github-actions[bot]@users.noreply.github.com" \
+              commit -qm "release: $TAG"
+          git remote add origin "https://github.com/${{ github.repository }}.git"
+          # 用 header 传凭据，避免 token 出现在 URL 里（会进 git 的报错与 reflog）
+          AUTH="$(printf 'x-access-token:%s' "${{ secrets.GITHUB_TOKEN }}" | base64 -w0)"
+          git -c http.extraheader="AUTHORIZATION: basic $AUTH" \
+              push -q --force origin HEAD:release-manifest
+
       - name: 摘要
         run: |
           {
@@ -70,4 +138,5 @@ jobs:
             echo "- \`${{ steps.meta.outputs.image }}:${{ steps.meta.outputs.tag }}\`"
             echo "- \`${{ steps.meta.outputs.image }}:latest\`"
             echo "- 平台：linux/amd64, linux/arm64"
+            echo "- 清单：\`https://raw.githubusercontent.com/${{ github.repository }}/release-manifest/release.json\`"
           } >> "$GITHUB_STEP_SUMMARY"

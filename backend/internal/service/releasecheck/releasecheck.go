@@ -105,9 +105,41 @@ func New() *Service {
 	}
 }
 
-// ManifestURL 返回当前配置的清单地址（未配置时为空串）。
+// DefaultManifestURL 是出厂清单地址（官方发布清单，由 .github/workflows/docker.yml
+// 在每次推 v* tag 时更新到 release-manifest 分支）。
+//
+// 为什么需要默认值：配置项出厂是空串。如果"空 = 不检查"，那么每个克隆部署的实例
+// 都必须先去管理台填一个地址才可能收到更新通知 —— 也就是"自动获取更新"出厂是关的，
+// 而绝大多数自部署用户不会想到去填。默认指向官方清单；fork 后想跟自己的发布，
+// 在管理台覆盖这个值即可，填 off 则彻底关闭。
+//
+// 必须是不重定向的直出地址：抓取用 netguard.DenyRedirect，而
+// github.com/.../releases/latest/download/... 是 302，会被判成 http_status。
+const DefaultManifestURL = "https://raw.githubusercontent.com/abcd153334/lingdong-api/release-manifest/release.json"
+
+// OffValue 是"显式关闭检查"的取值。空串表示"用出厂默认"，两者必须能区分 ——
+// 否则管理员没有任何办法关掉这个出站请求。
+const OffValue = "off"
+
+// Shared 返回进程内唯一实例（管理台读路径与后台定时任务共用同一份）。
+//
+// 唯一性是**契约**：冷却（15s）与结果缓存都挂在实例上。各调用方自己 new 的话，
+// 冷却与缓存同时失效，"点一下检查"就变成"对第三方站点发一次请求"；
+// 后台任务抓到的结果也没法被管理台看到（两个缓存互不相干）。
+func Shared() *Service { return shared }
+
+var shared = New()
+
+// ManifestURL 返回生效的清单地址（未配置走出厂默认，off 返回空串）。
 func ManifestURL() string {
-	return strings.TrimSpace(conf.System().String(ConfigKey, ""))
+	v := strings.TrimSpace(conf.System().String(ConfigKey, ""))
+	switch v {
+	case "":
+		return DefaultManifestURL
+	case OffValue:
+		return ""
+	}
+	return v
 }
 
 // Status 只读缓存，**绝不发起网络请求**。

@@ -284,14 +284,19 @@ func validate(ctx context.Context, gdb *gorm.DB, adminID uint64, next, prev map[
 			return bad("发布清单地址格式不合法")
 		}
 		v = strings.TrimSpace(v)
-		if v != "" {
+		// off 是"显式关闭自动检查"的哨兵值，不是地址：归一成小写后直接放行，
+		// 不做 https / 公网校验（它压根不会被请求）。
+		// 空串表示"用出厂默认清单"，所以这里也不能拒绝空串。
+		if strings.EqualFold(v, releasecheck.OffValue) {
+			v = releasecheck.OffValue
+		} else if v != "" {
 			if len(v) > releasecheck.ManifestURLMaxLen {
 				return bad("发布清单地址过长")
 			}
 			// 清单决定"要不要把线上换成另一个版本"：明文链路可被中间人改写，
 			// 所以只接受 https，即使目标是公网地址。
 			if !strings.HasPrefix(v, "https://") {
-				return bad("发布清单地址必须以 https:// 开头")
+				return bad("发布清单地址必须以 https:// 开头（或填 off 关闭检查）")
 			}
 			if err := ssrf.ValidatePublicURL(v); err != nil {
 				return bad("发布清单地址必须是公网地址（不能是内网/环回/本机名）")

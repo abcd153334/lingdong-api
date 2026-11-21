@@ -189,13 +189,32 @@ func TestCheckRejectsOversize(t *testing.T) {
 }
 
 func TestNotConfigured(t *testing.T) {
-	setManifestURL(t, "")
+	// 语义在 v2.2.7 变了：空串不再是"未配置"，而是"用出厂默认清单"——
+	// 否则每个克隆部署的实例都得先去管理台填地址才可能收到更新通知。
+	// 要关闭检查必须显式填 off，这两者必须能区分。
+	setManifestURL(t, OffValue)
 	s := New()
 	st := s.Status()
 	if st.Configured || st.ErrorKind != KindNotConfigured {
-		t.Fatalf("未配置应显式标 not_configured，实际 %+v", st)
+		t.Fatalf("off 应显式标 not_configured，实际 %+v", st)
 	}
 	if st2 := s.Check(context.Background(), true); st2.Configured {
-		t.Fatal("未配置时 Check 不应尝试出站")
+		t.Fatal("关闭检查时 Check 不应尝试出站")
+	}
+}
+
+// TestEmptyFallsBackToDefault 守着"出厂即可检查更新"这条承诺。
+func TestEmptyFallsBackToDefault(t *testing.T) {
+	setManifestURL(t, "")
+	if got := ManifestURL(); got != DefaultManifestURL {
+		t.Fatalf("空串应回落到出厂清单 %q，实际 %q", DefaultManifestURL, got)
+	}
+	setManifestURL(t, "  "+OffValue+"  ")
+	if got := ManifestURL(); got != "" {
+		t.Fatalf("off（含空白）应关闭检查，实际 %q", got)
+	}
+	setManifestURL(t, "https://example.com/r.json")
+	if got := ManifestURL(); got != "https://example.com/r.json" {
+		t.Fatalf("显式地址应原样生效，实际 %q", got)
 	}
 }

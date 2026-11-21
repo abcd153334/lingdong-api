@@ -77,9 +77,18 @@ fi
 
 cat >&2 <<EOF
 
-下一步：
+注意：**正常发版不需要跑这个脚本**。推 v* tag 时
+  .github/workflows/docker.yml 会自动生成清单并推送到 release-manifest 分支，
+  地址固定为：
+  https://raw.githubusercontent.com/abcd153334/lingdong-api/release-manifest/release.json
+
+本脚本只在两种情况下用：
+  · 离线环境 / 私有发布渠道（没有 GitHub Actions）
+  · 想手工指定 notes 或改清单内容
+
+手工路径：
   1. 确认 tag 已推送到远端：git push origin $TAG_ARG
-  2. 把上面的 JSON 上传到一个 https 公网地址（对象存储只读桶即可）
-  3. 管理台「系统配置 → 通用 → 版本与更新」填入该地址
-  4. 侧栏底部版本号旁应出现更新提示
+  2. 把上面的 JSON 放到一个 https **直出**地址（不能是 3xx 重定向：
+     抓取端禁重定向，重定向会被判 http_status）
+  3. 管理台「系统配置 → 版本与更新」填入该地址（留空则用官方清单）
 EOF

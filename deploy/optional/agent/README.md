@@ -18,8 +18,19 @@
 ## 安装
 
 ```bash
-sudo bash deploy/optional/agent/install.sh --repo /opt/lingdong/app
+sudo bash deploy/ld.sh updater              # 推荐：自动带上当前部署目录
+sudo bash deploy/ld.sh updater uninstall    # 卸载（任务表与备份不受影响）
 ```
+
+等价的底层命令（要自己确认路径时）：
+
+```bash
+sudo bash deploy/optional/agent/install.sh --repo /opt/lingdong-api/app
+```
+
+注意 `install.sh` 的 `--repo` 默认值是 `/opt/lingdong/app`，而本书的部署目录是
+`/opt/lingdong-api/app` —— 路径写错的表现是"装了但一直 `agent_offline`"，
+所以优先用 `ld.sh updater`（它按当前脚本位置推导，不会错）。
 
 前置（脚本会检查并在缺项时拒绝）：
 
@@ -34,7 +45,9 @@ sudo bash deploy/optional/agent/install.sh --repo /opt/lingdong/app
 ## 工作方式
 
 - 每 `INTERVAL`（默认 5 秒）查一次 `release_update_jobs` 里有没有 `queued` 任务。
-- 领取用一条 `UPDATE ... WHERE id=(SELECT ... FOR UPDATE SKIP LOCKED) RETURNING`，
+- 准备镜像时**优先拉 GHCR 上的预构建镜像**（几十秒），拉不到才本地构建（3–8 分钟）。
+  两条路都只经 `tag-release.sh` 一个入口 —— 它同时写 `.release`（version/commit/
+  image_id/data_epoch/previous），另写一份就是两套真相。- 领取用一条 `UPDATE ... WHERE id=(SELECT ... FOR UPDATE SKIP LOCKED) RETURNING`，
   不靠"先查再写"，也不依赖 flock 来保证唯一（flock 只防同机两个进程）。
 - 领取后启一个**独立子进程**每 10 秒刷新 `last_heartbeat_at`。
   必须是独立进程：构建是 3–8 分钟的阻塞调用，主循环在这期间刷新不了心跳，
