@@ -524,6 +524,21 @@ DRY-RUN：将按以下顺序执行（不碰数据库、不碰容器）
 EOF
 }
 
+# check_self_outdated 提示"仓库里的 agent 已经比正在跑的新"。
+#
+# 为什么需要这个提示：agent 的运行副本故意放在仓库之外（`/opt/lingdong/updater`，
+# 否则更新过程的 checkout 会改写正在执行的脚本）。代价是**升级应用不会升级 agent**，
+# 于是 agent 里的 bug 修复（比如 psql 的 SQL 通道）不重装就永远不生效，
+# 而症状是"点了更新没反应"——没人会想到去对比两个文件的哈希。
+check_self_outdated() {
+  local src="$REPO_PATH/deploy/optional/agent/ld-updater.sh"
+  [ -f "$src" ] || return 0
+  command -v sha256sum >/dev/null 2>&1 || return 0
+  if [ "$(sha256sum "$src" | cut -d' ' -f1)" != "$(sha256sum "$0" | cut -d' ' -f1)" ]; then
+    warn "更新程序与仓库版本不一致：执行 sudo bash deploy/ld.sh updater 让它生效"
+  fi
+}
+
 main() {
   [ "$DRY" = "1" ] && { dry_run_plan; exit 0; }
 
@@ -537,6 +552,7 @@ main() {
   flock -n 9 || die "已有另一个 ld-updater 在运行"
 
   log "启动：repo=$REPO_PATH interval=${INTERVAL}s"
+  check_self_outdated
   trap 'stop_heartbeat' EXIT
 
   local last_seen=0

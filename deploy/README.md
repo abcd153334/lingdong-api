@@ -185,6 +185,10 @@ sudo bash deploy/ld.sh updater              # 装（自动带上当前部署目�
 sudo bash deploy/ld.sh updater uninstall    # 卸（任务表与备份不受影响）
 ```
 
+**升级应用不会升级它自己**：执行器的运行副本在 `/opt/lingdong/updater`（故意放在仓库之外，
+否则更新过程的 `checkout` 会改写正在执行的脚本）。所以 `ld.sh updater` 要重跑一次才能让
+agent 的新版本生效 —— 它启动时会对比两个文件的哈希，不一致就打一行 WARN 提醒你。
+
 侧栏底部点版本号 → 「版本与更新」。「立即更新」能不能点由后端判定，
 灰着时弹窗会直接写原因：清单没配 / 执行器离线 / 已是最新 / 有任务在跑 / 版本号不可比。
 
@@ -259,6 +263,12 @@ curl -sS http://127.0.0.1:8088/api/health?deep=1
 | `no_update` | 真的是最新版（`update_available=false`） |
 | `manifest_error` | 抓不到清单：看 `error_kind`（`blocked` = 非 https/内网、`http_status` = 404 或重定向、`timeout` = 出站被拦） |
 | `already_running` | 有一个任务在跑；排队中的可以取消，执行中的不行 |
+
+**点了「立即更新」之后什么都没发生？**
+先确认执行器还活着：`systemctl status ld-updater`。它停了任务会一直 `queued`，
+60 秒后被后端判 `agent_offline`（弹窗里能看到这个失败码）。
+另一种情况是执行器版本比仓库旧（改过 agent 但没重装）：
+`journalctl -u ld-updater | grep 不一致` 会有这行 WARN。
 
 **一键更新中途失败，站点是好的吗？**
 是。更新只在最后一步切容器，之前任何一步失败都会把检出恢复原样、容器与库都没动。
