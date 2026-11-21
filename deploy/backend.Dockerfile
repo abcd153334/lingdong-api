@@ -14,17 +14,23 @@ FROM node:22-alpine AS web
 ENV COREPACK_NPM_REGISTRY=https://registry.npmmirror.com
 ENV npm_config_registry=https://registry.npmmirror.com
 
-# pnpm 必须**锁版本**，不能用 `corepack enable` 放任它自己解析。
-# 没有 packageManager 字段时 corepack 取内置默认版本，而 web/pnpm-lock.yaml 是 pnpm 12
-# 写的 —— 大版本不匹配时 `--frozen-lockfile` 直接失败（v2.2.0 的首次 CI 发布就挂在这里，
-# 报错只有一句 "process ... did not complete successfully"）。
-# 版本与 web/package.json 的 packageManager 字段保持一致。
+# pnpm 必须**锁版本**，不能用 `corepack enable` 放任它自己解析：
+# 没有 packageManager 字段时 corepack 取内置默认大版本，与写出 web/pnpm-lock.yaml 的
+# pnpm 12 不匹配，`--frozen-lockfile` 直接失败。
+# 反过来也**不要**在 web/package.json 里写 packageManager —— pnpm 12 会要求把该字段
+# 记进锁文件（ERR_PNPM_FROZEN_LOCKFILE_WITH_OUTDATED_LOCKFILE），而已发布的锁文件里没有。
+# 结论：版本只在这里定，一处。
 RUN npm install -g pnpm@12.14.0
 
 WORKDIR /web
 
 # 先只拷清单，让依赖层单独命中缓存：改一行前端代码不必重装依赖。
-COPY web/package.json web/pnpm-lock.yaml ./
+#
+# pnpm-workspace.yaml 必须一起拷：它只有一行 `allowBuilds: {esbuild: true}`。
+# 少了它 pnpm 会以 `ERR_PNPM_IGNORED_BUILDS` **硬失败**（不是警告）——
+# v2.2.1 的 CI 与服务器本地构建都挂在这一步，而日志里只有一句笼统的
+# "did not complete successfully"。
+COPY web/package.json web/pnpm-lock.yaml web/pnpm-workspace.yaml ./
 # --frozen-lockfile：锁文件与 package.json 不一致时**直接失败**。
 # 不加这个参数，pnpm 会静默改写锁文件并装出"另一套依赖"——
 # 镜像与本地/CI 就不是同一棵依赖树了，而构建仍然"成功"。
