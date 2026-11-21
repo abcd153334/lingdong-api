@@ -23,6 +23,7 @@ import (
 	"lingdong-api/internal/relay"
 	_ "lingdong-api/internal/relay/adapters" // 注册内置渠道适配器（openai 等）
 	"lingdong-api/internal/service/task"
+	"lingdong-api/internal/webui"
 )
 
 // validateTrustedProxies 拒绝会让 X-Forwarded-For 完全可控的网段。
@@ -53,6 +54,9 @@ func validateTrustedProxies(list []string) error {
 	}
 	return nil
 }
+
+// spaHandler 在包初始化时建好索引：内嵌产物只读一次，请求期不再遍历 embed.FS。
+var spaHandler = webui.Handler()
 
 // New 构造 Gin 引擎并注册全局中间件与路由分组。
 func New() *gin.Engine {
@@ -142,7 +146,9 @@ func New() *gin.Engine {
 			case strings.HasPrefix(c.Request.URL.Path, "/f/"):
 				controller.FileDirect(c)
 			default:
-				response.NotFound(c)
+				// 最后才是前端页面：SPA 的深链（/admin/docs、/portal/keys…）都不在路由表里，
+				// 由内嵌产物兜底。必须放在 /v1、/f 之后 —— 否则 API 拼错路径会被答成 200 + HTML。
+				spaHandler(c)
 			}
 		},
 	)

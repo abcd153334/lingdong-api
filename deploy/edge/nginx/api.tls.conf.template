@@ -1,0 +1,46 @@
+# 纯 API 节点的 TLS 入口（LD_NODE_MODE=api，形态 A/B）
+#
+# 与门户版的差别只有一个：域名根直接 404 —— api 节点不提供任何前端。
+# 路径白名单由后端自己裁决（middleware/surface.go），这里不做白名单：
+# 反代层再抄一份规则，就会出现"nginx 放行、后端 404"或反过来，两边永远不同步。
+#
+# 替换 __DOMAIN__ / __WEBROOT__ / __UPSTREAM__：
+#   - 完整节点（页面 + API 同一个进程）→ http://127.0.0.1:8088
+#   - 只有 API（cluster 的 api profile）→ http://backend:8080（compose 网络内，未发布到宿主）
+
+server {
+    listen 80;
+    server_name __DOMAIN__;
+    server_tokens off;
+
+    location ^~ /.well-known/acme-challenge/ {
+        root __WEBROOT__;
+        default_type "text/plain";
+        try_files $uri =404;
+    }
+
+    location / { return 301 https://$host$request_uri; }
+}
+
+server {
+    listen 443 ssl;
+    http2 on;
+    server_name __DOMAIN__;
+    server_tokens off;
+
+    ssl_certificate     /etc/letsencrypt/live/__DOMAIN__/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/__DOMAIN__/privkey.pem;
+    ssl_protocols       TLSv1.2 TLSv1.3;
+    ssl_session_cache   shared:SSL:10m;
+    ssl_session_timeout 1d;
+
+    add_header Strict-Transport-Security "max-age=31536000; includeSubDomains" always;
+
+    location = / { return 404; }
+
+    location / {
+        include /etc/nginx/snippets/proxy-common.conf;
+        include /etc/nginx/snippets/timeouts.conf;
+        proxy_pass __UPSTREAM__;
+    }
+}

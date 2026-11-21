@@ -1,0 +1,68 @@
+# 门户 + API 的 TLS 入口（形态 A/B）
+#
+# 用法：
+#   1. 替换 __DOMAIN__ / __WEBROOT__ / __UPSTREAM__
+#      - 装机：__UPSTREAM__ = http://127.0.0.1:8088（本系统唯一对外端口）
+#      - 多机：__UPSTREAM__ = http://10.0.0.12:8088（内网节点）
+#   2. cp 到 /etc/nginx/conf.d/lingdong.conf
+#   3. nginx -t && nginx -s reload
+#
+# 这一层是**纯 TLS 终结**：静态、SPA 回落、gzip、缓存与安全头都在应用里，
+# 不在这里重复一遍（重复就是两套真相源，改一处漏一处）。
+#
+# 不要开 http3 / listen 443 quic：QUIC 空闲超时固定 60s 且无指令可调，
+# 同步等图的 780s 会在第 60 秒被掐断。
+
+server {
+    listen 80;
+    server_name __DOMAIN__;
+    server_tokens off;
+
+    # ACME webroot 校验必须留在 80，且不能被 301 掉
+    location ^~ /.well-known/acme-challenge/ {
+        root __WEBROOT__;
+        default_type "text/plain";
+        try_files $uri =404;
+    }
+
+    location / {
+        return 301 https://$host$request_uri;
+    }
+}
+
+server {
+    listen 443 ssl;
+    http2 on;
+    server_name __DOMAIN__;
+    server_tokens off;
+
+    ssl_certificate     /etc/letsencrypt/live/__DOMAIN__/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/__DOMAIN__/privkey.pem;
+    ssl_protocols       TLSv1.2 TLSv1.3;
+    ssl_prefer_server_ciphers on;
+    ssl_session_cache   shared:SSL:10m;
+    ssl_session_timeout 1d;
+
+    # HSTS 放到第 4 步再加（见 deploy/edge/README.md 的上线顺序）：
+    # 浏览器记住一年，撤回只能 max-age=0，且对已缓存的客户端无效。
+    add_header Strict-Transport-Security "max-age=31536000; includeSubDomains" always;
+    add_header X-Content-Type-Options "nosniff" always;
+
+    # 图标路由单独一段：它没有扩展名，落进通用 location 会被
+    # 「按扩展名判静态」的规则误加 Cache-Control: no-cache，覆盖后端的一年强缓存。
+    # 这里直接透传，后端给什么就是什么。
+    location ^~ /api/icons/ {
+        include /etc/nginx/snippets/proxy-common.conf;
+        include /etc/nginx/snippets/timeouts.conf;
+        proxy_read_timeout 60s;
+        proxy_send_timeout 60s;
+        proxy_pass __UPSTREAM__;
+    }
+
+    # 其余全部交给应用（静态 + /api + /v1 + /f/ 同进程）
+    location / {
+        include /etc/nginx/snippets/proxy-common.conf;
+        include /etc/nginx/snippets/timeouts.conf;
+        proxy_pass __UPSTREAM__;
+    }
+}

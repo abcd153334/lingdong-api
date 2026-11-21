@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # G2：编排门禁。
 #
-# 正向：单机 / 集群（full、api 两个 profile）都能被 compose 解析。
+# 正向：单机（3 个容器）与集群节点编排都能被 compose 解析。
 # 负向：缺 TAG、缺 APP_ENCRYPTION_KEY、缺 POSTGRES_PASSWORD 必须**失败** ——
 #       一个"少填也能起来"的模板，等于把密钥闸门交给运气。
 #
@@ -39,20 +39,20 @@ else
   fail=1
 fi
 
-echo "== 正向：集群 full / api"
-for p in full api; do
-  if TAG=v0.0.0 docker compose --env-file "$TMP_ENV" -f cluster/docker-compose.node.yml \
-       --profile "$p" config -q 2>/tmp/ld-c2.err; then
-    echo "PASS cluster --profile $p 可解析"
-  else
-    echo "FAIL cluster --profile $p 无法解析：$(head -2 /tmp/ld-c2.err | tr '\n' ' ')"
-    fail=1
-  fi
-done
+echo "== 正向：集群节点编排"
+# v2.2.0 起节点里不再有 web/edge 容器（前端内嵌在应用里），所以没有 profile 之分，
+# 「完整节点 / 纯 API」只由 LD_NODE_MODE 决定。
+if TAG=v0.0.0 docker compose --env-file "$TMP_ENV" -f optional/cluster/docker-compose.node.yml \
+     config -q 2>/tmp/ld-c2.err; then
+  echo "PASS cluster 可解析"
+else
+  echo "FAIL cluster 无法解析：$(head -2 /tmp/ld-c2.err | tr '\n' ' ')"
+  fail=1
+fi
 
 echo "== 负向：缺 TAG 必须失败"
-if TAG= docker compose --env-file "$TMP_ENV" -f cluster/docker-compose.node.yml \
-     --profile api config -q >/dev/null 2>&1; then
+if TAG= docker compose --env-file "$TMP_ENV" -f optional/cluster/docker-compose.node.yml \
+     config -q >/dev/null 2>&1; then
   echo "FAIL 集群编排缺 TAG 仍然解析成功：禁止 latest 的闸门失效"
   fail=1
 else

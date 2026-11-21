@@ -73,6 +73,14 @@ func ValidateSecrets(e Env) (warnings []string, err error) {
 
 	devLike := e.AppEnv == "dev" || e.AppEnv == "test"
 
+	// auto 模式下 Secure 按每个请求的协议决定。生产里这是"先把页面跑起来"的入口：
+	// 明文 http 时 Cookie 不带 Secure，同链路上的明文请求可能带走会话票据。
+	// 不拒绝启动（那会把首次验证卡在证书上），但必须让人看见一次。
+	if !devLike && (e.CookieSecureMode == "" || e.CookieSecureMode == "auto") {
+		warnings = append(warnings,
+			"LD_COOKIE_SECURE=auto：Cookie 的 Secure 取决于请求协议；对外入口不是 https 时不会带（建议仅用于首次验证，正式入口请上 TLS）")
+	}
+
 	// 测试固定验证码 = 万能答案。生产出现它等于人机验证被关掉。
 	if !devLike && strings.TrimSpace(e.CaptchaTestCode) != "" {
 		return nil, fmt.Errorf("LD_CAPTCHA_TEST_CODE 只能用于 dev/test：生产设置它等于关闭人机验证")

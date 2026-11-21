@@ -23,7 +23,7 @@ import (
 type Options struct {
 	// Wait 是等待上限：到点必须放弃（返回 Hooks.Timeout 构造的错误）。
 	//
-	// 调用方必须保证它小于反向代理的读超时（deploy/nginx.conf 的 960s）：
+	// 调用方必须保证它小于反向代理的读超时（入口层 proxy_read_timeout 的 960s（deploy/edge/nginx/snippets/timeouts.conf））：
 	// 代理先断的话，应用这边即使等到结果也写不出去，客户端只拿到 504 HTML。
 	Wait time.Duration
 	// Interval 是首次轮询间隔。

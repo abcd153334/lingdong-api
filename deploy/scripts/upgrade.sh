@@ -36,8 +36,9 @@ esac
 require_docker
 
 # 镜像必须已经存在：不存在说明"忘了构建"，此时 up -d 会拿到旧的同名镜像或直接失败
-if ! docker image inspect "lingdong-api-backend:$TAG_ARG" >/dev/null 2>&1; then
-  die "找不到镜像 lingdong-api-backend:$TAG_ARG —— 先执行 tag-release.sh $TAG_ARG，或确认这是一次回滚（旧镜像被清理了就得重新构建同一份源码）"
+IMG="$(app_image "$TAG_ARG")"
+if ! docker image inspect "$IMG" >/dev/null 2>&1; then
+  die "找不到镜像 $IMG —— 先执行 tag-release.sh $TAG_ARG，或确认这是一次回滚（旧镜像被清理了就得重新构建同一份源码）"
 fi
 
 if [ "$DO_PREFLIGHT" = "1" ]; then
@@ -58,7 +59,7 @@ epoch_now="$(grep -E '^data_epoch=' "$DEPLOY_DIR/.release" 2>/dev/null | cut -d=
 if [ "$APP_ONLY" = "1" ]; then scope="仅应用容器"; else scope="全量"; fi
 log "切换镜像 → TAG=$TAG_ARG（$scope）"
 if [ "$APP_ONLY" = "1" ]; then
-  compose_tag "$TAG_ARG" up -d --no-deps backend web
+  compose_tag "$TAG_ARG" up -d --no-deps backend
 else
   compose_tag "$TAG_ARG" up -d
 fi

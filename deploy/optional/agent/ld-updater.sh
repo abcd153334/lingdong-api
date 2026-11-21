@@ -27,6 +27,11 @@ CONF="${CONF:-/etc/lingdong/updater.conf}"
 REPO_PATH="${REPO_PATH:-/opt/lingdong/app}"
 INTERVAL="${INTERVAL:-5}"
 LOCK_FILE="${LOCK_FILE:-/var/lock/ld-updater.lock}"
+# 探活地址：走**对外入口端口**（宿主 127.0.0.1:8088 → web → backend），
+# 与用户真实链路一致。比探 backend 的 8080 更能反映"这次切换到底成没成"：
+# nginx 配置写错、上游指错服务，在 8080 上完全看不出来。
+# 换端口不必改这里 —— 默认读编排的 APP_PORT，读不到就退回 8088。
+HEALTH_URL="${HEALTH_URL:-}"
 AGENT_VERSION="1"
 
 DRY=0
@@ -166,7 +171,18 @@ data_epoch() {
 }
 
 running_version() {
-  curl -sS --max-time 3 http://127.0.0.1:8080/api/health 2>/dev/null \
+  local url="$HEALTH_URL"
+  if [ -z "$url" ]; then
+    local port=""
+    # 从 .env 读 APP_PORT（与 compose 同一个变量；旧文件里可能还是 WEB_PORT），
+    # 再退回编排默认值 8088。
+    if [ -f "$ENV_FILE" ]; then
+      port="$(grep -E '^APP_PORT=' "$ENV_FILE" 2>/dev/null | tail -n1 | cut -d= -f2- | tr -d '\r "')"
+      [ -n "$port" ] || port="$(grep -E '^WEB_PORT=' "$ENV_FILE" 2>/dev/null | tail -n1 | cut -d= -f2- | tr -d '\r "')"
+    fi
+    url="http://127.0.0.1:${port:-8088}/api/health"
+  fi
+  curl -sS --max-time 3 "$url" 2>/dev/null \
     | tr -d '\n' | sed -n 's/.*"version":"\([^"]*\)".*/\1/p'
 }
 

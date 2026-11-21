@@ -30,13 +30,23 @@ POST /suno/submit/{kind}       GET  /suno/fetch/{id}
 前置：Docker 与 Docker Compose v2。
 
 ```bash
-cp deploy/.env.example deploy/.env && chmod 600 deploy/.env   # 填 4 项必填
-bash deploy/scripts/preflight.sh                              # 环境自检
-bash deploy/ld.sh up                                          # 起四容器
-curl -fsS http://127.0.0.1/api/health                         # 分层健康探针
+git clone https://github.com/abcd153334/lingdong-api.git && cd lingdong-api
+bash deploy/ld.sh up        # 自动生成配置 → 起 3 个容器 → 等健康
+curl -fsS http://127.0.0.1:8088/api/health
 ```
 
-浏览器打开站点 → 管理员登录（首次强制改密）→ 建渠道 → 建 KEY。
+初始管理员口令只在首次启动打印一次：
+`docker compose -f deploy/docker-compose.yml logs backend | grep 初始口令`。
+
+本机 `http://127.0.0.1:8088` 即可打开站点（管理员登录 → 首次强制改密 → 建渠道 → 建 KEY）。
+**这个 8088 是整套系统唯一的对外端口**，且只绑回环：对外服务要在它前面放一层终止 TLS 的入口，
+两种都随仓提供 —— 宝塔面板反代见 [`deploy/edge/bt/`](deploy/edge/bt/README.md)，
+独立 nginx 见 [`deploy/edge/`](deploy/edge/README.md)。完整步骤见
+[`deploy/README.md`](deploy/README.md)。
+
+> **页面与 API 在同一个进程里**：前端产物用 `go:embed` 打进二进制，所以没有独立的
+> nginx 容器，也没有第二层转发头可配错。生产建议加 TLS；明文入口能登录，
+> 但会话票据会以明文过链路（仅适合首次验证）。
 
 > 本系统**不支持 SQLite，Redis 不可省**。账务约束与 worker leader 锁（资金互斥）
 > 依赖 PostgreSQL 与 Redis，因此是硬依赖而非可选缓存。

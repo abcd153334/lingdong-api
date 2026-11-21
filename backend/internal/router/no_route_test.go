@@ -46,14 +46,18 @@ func TestUnmatchedProtocolPathIsAuthenticated(t *testing.T) {
 }
 
 // TestUnmatchedControlPathStays404 控制面与直链域的未知路径仍是 404，不能被协议化。
+//
+// 注意别再拿 `/nope` 当样本：v2.2.0 起前端产物内嵌进同一进程，任意「像页面」的路径
+// 都会回落成 SPA（这是深链 /admin/docs 能直接打开的前提）。控制面的判据是**路径前缀**，
+// 所以样本必须是 `/api/...` 这类真前缀。
 func TestUnmatchedControlPathStays404(t *testing.T) {
 	r := newTestRouter()
 
 	w := httptest.NewRecorder()
-	r.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/nope", nil))
+	r.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/api/nope", nil))
 
 	if w.Code != http.StatusNotFound {
-		t.Fatalf("/nope 应为 404，实际 %d body=%s", w.Code, w.Body.String())
+		t.Fatalf("/api/nope 应为 404，实际 %d body=%s", w.Code, w.Body.String())
 	}
 	if !strings.Contains(w.Body.String(), `"error_code"`) {
 		t.Fatalf("控制面 404 应为平台信封，实际 %s", w.Body.String())

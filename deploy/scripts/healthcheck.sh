@@ -38,6 +38,12 @@ done
 # 不相干的服务（本机就有一条 frp 隧道通到另一套生产实例）。此时新容器正在崩溃重启，
 # 健康检查照样 200，`upgrade` 于是报「已切到 vX」——把最该拦住的失败放行。
 # 真机上就是这样：后端压根没起来，检查输出的却是另一套实例的 version/uptime。
+#
+# 探的是**对外端口**（默认 8088，`APP_PORT` 可改）而不是容器内的 8080：
+#   用户走的就是这条链路（入口 → 应用的 8088），入口写错 / 容器没起 / 端口被占
+#   这三种故障在这里都会体现；只探容器内会漏掉前两种。
+# `compose port` 读的是**实际生效的编排**（含 APP_PORT 与任何 override），
+# 所以换端口、加 override 都不需要改本脚本。
 default_base() {
   local pub=""
   pub="$(compose port backend 8080 2>/dev/null | head -n1 | tr -d '\r')"
@@ -45,7 +51,7 @@ default_base() {
     0.0.0.0:*|:::*) pub="127.0.0.1:${pub##*:}" ;;
   esac
   if [ -n "$pub" ]; then printf 'http://%s' "$pub"; return; fi
-  printf 'http://127.0.0.1:8080'
+  printf 'http://127.0.0.1:%s' "$(resolve_app_port)"
 }
 if [ -z "$BASE" ]; then BASE="$(default_base)"; fi
 log "探测地址：$BASE"

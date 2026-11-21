@@ -146,7 +146,19 @@ type Env struct {
 	// 默认值按环境推导：dev 下为 false（http://localhost 不是安全上下文，
 	// 带 Secure 的 Cookie 浏览器会直接丢弃 → 本地怎么登录都失败），
 	// 其余环境默认 true。生产必须 true，否则同链路上的任何明文请求都会带走会话票据。
+	//
+	// **实际写 Cookie 时以 CookieSecureMode 为准**（见 authcookie）：auto 模式要按
+	// 每个请求的协议决定，静态布尔值表达不了。这个字段保留给"想要一个粗粒度判断"的
+	// 调用方，在 auto 下按环境给出保守值（prod 视为 true）。
 	CookieSecure bool
+	// CookieSecureMode 是 LD_COOKIE_SECURE 的归一值：auto（默认）/ true / false。
+	//
+	// auto 的语义：请求经 TLS（或入口声明 X-Forwarded-Proto=https）才加 Secure，
+	// 明文 http 不加。这样「本机 http 先验一遍」与「生产上 TLS」用同一份配置，
+	// 不需要用户为了第一次登录先配证书（那是 new-api 用两个变量解决、我们用零个）。
+	// 代价是：入口忘了传 X-Forwarded-Proto 时，https 请求会拿到不带 Secure 的 Cookie
+	// —— 所以模板里必须有那一行（deploy/edge/nginx/snippets/proxy-common.conf 已带）。
+	CookieSecureMode string
 	// AllowedOrigins 是允许跨域携带凭证的来源（LD_ALLOWED_ORIGINS，逗号分隔）。
 	//
 	// 空 = 只允许同源（默认）。同源部署（nginx 反代）下 CSRF 靠 Origin 校验即可，
@@ -169,11 +181,31 @@ func defaultCookieSecure() bool {
 	return true
 }
 
+// cookieSecureMode 归一 LD_COOKIE_SECURE。非法值按环境取保守档：
+// prod 视作 true（宁可不登录，也不发明文会话），dev/test 视作 auto。
+func cookieSecureMode() string {
+	switch strings.ToLower(strings.TrimSpace(os.Getenv("LD_COOKIE_SECURE"))) {
+	case "", "auto":
+		return "auto"
+	case "1", "true", "yes", "on":
+		return "true"
+	case "0", "false", "no", "off":
+		return "false"
+	}
+	if defaultCookieSecure() {
+		return "true"
+	}
+	return "auto"
+}
+
 var current Env
 
 // Load 读取 .env（若存在）与环境变量，缺失项取默认值，并缓存到全局供各组件读取。
 func Load() Env {
 	_ = godotenv.Load()
+
+	// Cookie 模式只解析一次，两个字段必须同源（分开各调一次迟早分叉）。
+	csMode := cookieSecureMode()
 
 	current = Env{
 		// 不再默认 "dev"：缺省值会让「忘了设 APP_ENV」的部署自动获得 dev 的全部放宽
@@ -214,9 +246,11 @@ func Load() Env {
 		SeedEnabled:    getenvBool("LD_SEED_ENABLED", true),
 		BuiltinPresets: getenvBool("LD_BUILTIN_PRESETS", true),
 
-		CookieSecure:    getenvBool("LD_COOKIE_SECURE", defaultCookieSecure()),
-		AllowedOrigins:  strings.TrimSpace(os.Getenv("LD_ALLOWED_ORIGINS")),
-		CaptchaTestCode: strings.TrimSpace(os.Getenv("LD_CAPTCHA_TEST_CODE")),
+		// CookieSecure 只作为粗粒度判断（prod 视为 true）；真正写 Cookie 用 CookieSecureMode。
+		CookieSecure:     csMode == "true" || (csMode == "auto" && defaultCookieSecure()),
+		CookieSecureMode: csMode,
+		AllowedOrigins:   strings.TrimSpace(os.Getenv("LD_ALLOWED_ORIGINS")),
+		CaptchaTestCode:  strings.TrimSpace(os.Getenv("LD_CAPTCHA_TEST_CODE")),
 	}
 	return current
 }

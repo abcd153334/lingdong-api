@@ -1,0 +1,68 @@
+# 宝塔面板反向代理配置模板（正式入口 A）
+#
+# 用法见同目录 README.md。核心是四件事，缺一件就会出用户可见的故障：
+#   1. 超时 960s（> 应用侧 780s 的同步等待；相等也不行）
+#   2. 关闭 buffering（图片/SSE 立即透传）
+#   3. 请求体上限 256m（默认 1m 会让参考图在 nginx 就被 413）
+#   4. X-Forwarded-Host 用 $http_host（$host 会砍端口 ⇒ CSRF origin 比对失败）
+#
+# 占位符：__UPSTREAM__（默认 http://127.0.0.1:8088）、__DOMAIN__（仅注释用）
+#
+# 生效：/www/server/nginx/sbin/nginx -t && /www/server/nginx/sbin/nginx -s reload
+
+#PROXY-START/
+
+# 图标资源（/api/icons/b/<key>、/api/icons/u/<id>）单独一个 location。
+#
+# 为什么必须单独提出来：下方通用 location 里那条「按扩展名判静态」的规则
+# （`$uri ~* "\.(gif|png|jpg|css|js|woff|woff2)$"`）看不懂图标路由 —— 它没有扩展名，
+# 于是被判成动态请求并**追加** `Cache-Control: no-cache`。而鉴权、etag、一年强缓存
+# 全由后端下发（见 controller/icon.go）：同一个响应带两个 Cache-Control 时
+# 浏览器按最严格的那个来，结果是「每开一次弹窗、几十张图全部回源」。
+# 这里不带任何 add_header，后端给什么就透传什么。
+location ^~ /api/icons/
+{
+    proxy_pass __UPSTREAM__;
+    proxy_set_header Host $http_host;
+    proxy_set_header X-Real-IP $remote_addr;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto $scheme;
+    # 原始主机（含端口）：多线路/非 443 端口部署下，后端据此判断"用户实际从哪进来"，
+    # 从而把 icon_url / 产物直链 / 文档示例里的 origin 换成那条线路。
+    proxy_set_header X-Forwarded-Host $http_host;
+    proxy_http_version 1.1;
+    proxy_connect_timeout 15s;
+    proxy_read_timeout 60s;
+    proxy_send_timeout 60s;
+    proxy_buffering off;
+}
+
+location ^~ /
+{
+    proxy_pass __UPSTREAM__;
+    proxy_set_header Host $http_host;
+    proxy_set_header X-Real-IP $remote_addr;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header REMOTE-HOST $remote_addr;
+    proxy_set_header Upgrade $http_upgrade;
+    proxy_set_header Connection $connection_upgrade;
+    # 对外绝对地址（图标 icon_url、任务产物直链、文档示例）由 siteurl.Base 推导，
+    # 没有 site.api_base_url 配置时它用这个头判 scheme。不传就一律算成 http，
+    # 于是 https 站点里下发 http 的图片地址，浏览器按混合内容拦掉。
+    proxy_set_header X-Forwarded-Proto $scheme;
+    proxy_set_header X-Forwarded-Host $http_host;
+    proxy_http_version 1.1;
+
+    # 超时阶梯：客户端 ≥960s > 本层 960s > 应用同步等待 780s > 单次上游 60s
+    proxy_connect_timeout 15s;
+    proxy_read_timeout 960s;
+    proxy_send_timeout 960s;
+    send_timeout 960s;
+    proxy_buffering off;
+    client_max_body_size 256m;
+
+    # 面板模板自带的一分钟静态缓存与 no-cache：与后端下发的强缓存冲突，
+    # 会让 /assets 之外的图片、产物每次回源。这里只保留上游给的缓存头。
+    proxy_hide_header X-Cache;
+}
+#PROXY-END/

@@ -26,7 +26,7 @@ const DefaultAdapterTimeout = 60 * time.Second
 
 // 长耗时端点的超时上限。
 //
-// 取值依据：反代 /v1/ 的 proxy_read_timeout 是 960s（deploy/nginx.conf），
+// 取值依据：反代 /v1/ 的 proxy_read_timeout 是 960s（入口层模板：deploy/edge/nginx/snippets/timeouts.conf），
 // 应用层不能再往上顶，否则客户端先拿到 nginx 的 504、而我们在后台继续等。
 const (
 	// ImageEndpointTimeout 覆盖同步出图（gpt-image / dall-e / 各家同步生图）。

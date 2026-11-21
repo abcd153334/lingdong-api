@@ -1,25 +1,24 @@
 #!/usr/bin/env bash
-# 部署脚本统一入口：记住六条命令，不必记路径与参数顺序。
+# 部署统一入口（v2.2.0）：日常只有一条命令 —— `bash deploy/ld.sh up`。
 #
 # 只做转发：任何"智能判断"都应该在具体脚本里，否则排障要读两处。
 
 set -euo pipefail
 DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-# 编排文件：默认 docker-compose.yml；本机已有别的站点占着 80/443、或不想把
-# 数据库端口发布到宿主机时，用 COMPOSE_FILE 指到一个 override 文件（它 include 基座）。
-#
-# scripts/*.sh 一直认这个变量（common.sh: COMPOSE_FILE="${COMPOSE_FILE:-...}"），
-# 只有本入口把文件名写死了 —— 于是最常用的 up/down/ps/logs/config 恰好用不了 override，
-# 而 tag/upgrade/health/backup 可以。同一套部署两套语义，排障时最难想到。
-COMPOSE_FILE="${COMPOSE_FILE:-docker-compose.yml}"
+# 编排文件：默认 docker-compose.yml。
+# 同一台机器要跑多套、或端口/网段要换时，用 COMPOSE_FILE 指到自己的文件；
+# scripts/*.sh 与 common.sh 都认这个变量（以前只有部分脚本认，最常用的 up/down 反而不认）。
+COMPOSE_FILE="${COMPOSE_FILE:-$DIR/docker-compose.yml}"
 
 usage() {
   cat <<'EOF'
 用法：bash deploy/ld.sh <命令> [参数]
 
-  up                首次启动 / 应用改动（构建 + 启动，TAG 取自 .env 或 local）
+  up [--pull]       启动（自动生成 .env；--pull 优先拉发布镜像，否则本地构建）
+  init              只生成/补全 deploy/.env（幂等，不覆盖已有值）
   down              停止（保留卷与数据）
+  restart           重启应用容器（不重建、不改配置）
   ps                容器状态
   logs [服务]       跟踪日志（默认 backend）
   health            浅探 + 深探
@@ -35,17 +34,32 @@ EOF
 case "${1-}" in
   up)
     shift
-    ( cd "$DIR" && docker compose -f "$COMPOSE_FILE" up -d --build "$@" )
-    bash "$DIR/scripts/healthcheck.sh" --wait 120
+    pull=0; args=()
+    for a in "$@"; do
+      case "$a" in
+        --pull) pull=1 ;;
+        *) args+=("$a") ;;
+      esac
+    done
+    # 没有 .env 就先造一个：3 个密钥自动生成，用户不需要手填任何值。
+    bash "$DIR/scripts/init-env.sh"
+    if [ "$pull" = "1" ]; then
+      ( cd "$DIR" && docker compose -f "$COMPOSE_FILE" pull )
+      ( cd "$DIR" && docker compose -f "$COMPOSE_FILE" up -d "${args[@]}" )
+    else
+      # 默认构建：验的是"这份 checkout 能不能跑"。镜像已存在时 Docker 会复用层缓存。
+      ( cd "$DIR" && docker compose -f "$COMPOSE_FILE" up -d --build "${args[@]}" )
+    fi
+    bash "$DIR/scripts/healthcheck.sh" --wait 180
     ;;
+  init)        bash "$DIR/scripts/init-env.sh" ;;
   down)
     shift
     # 不加 -t：让 compose 使用各服务的 stop_grace_period（默认 10s 会硬切在途请求）
     ( cd "$DIR" && docker compose -f "$COMPOSE_FILE" down "$@" )
     ;;
-  ps)
-    ( cd "$DIR" && docker compose -f "$COMPOSE_FILE" ps )
-    ;;
+  restart)     ( cd "$DIR" && docker compose -f "$COMPOSE_FILE" restart backend ) ;;
+  ps)          ( cd "$DIR" && docker compose -f "$COMPOSE_FILE" ps ) ;;
   logs)
     svc="${2:-backend}"
     ( cd "$DIR" && docker compose -f "$COMPOSE_FILE" logs -f --tail=200 "$svc" )

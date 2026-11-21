@@ -9,6 +9,7 @@ package authcookie
 
 import (
 	"net/http"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 
@@ -25,7 +26,7 @@ const path = "/"
 // 一律不带 Cookie，用户看到的是「已登录却提示未登录」。
 // Lax 下跨站的 POST/PUT/DELETE 不带 Cookie，配合 CSRF 双提交已经足够。
 func SetSession(c *gin.Context, ticket, csrf string, maxAge int) {
-	secure := conf.EnvConfig().CookieSecure
+	secure := secureFor(c)
 	c.SetSameSite(http.SameSiteLaxMode)
 	// 会话票必须 HttpOnly：它是凭证本身，XSS 不该能读走它。
 	c.SetCookie(session.CookieName, ticket, maxAge, path, "", secure, true)
@@ -39,7 +40,7 @@ func SetSession(c *gin.Context, ticket, csrf string, maxAge int) {
 // 必须成对清除：只清会话票会留下一个永远对不上的 CSRF 值，
 // 前端仍然会把它放进请求头，而服务端已经没有会话可校验。
 func Clear(c *gin.Context) {
-	secure := conf.EnvConfig().CookieSecure
+	secure := secureFor(c)
 	c.SetSameSite(http.SameSiteLaxMode)
 	c.SetCookie(session.CookieName, "", -1, path, "", secure, true)
 	c.SetCookie(session.CSRFCookieName, "", -1, path, "", secure, false)
@@ -61,4 +62,44 @@ func CSRF(c *gin.Context) string {
 		return ""
 	}
 	return v
+}
+
+// secureFor 决定**这一次响应**的 Cookie 是否带 Secure。
+//
+// LD_COOKIE_SECURE=auto（默认）时按请求协议判断：这个开关存在的理由是把
+// 「第一次登录」从"必须先配好证书"里解出来 —— prod 默认 Secure，而纯 http 入口下
+// 浏览器不会回传带 Secure 的 Cookie，症状是"登录接口 200、之后全 401"，
+// 是自查成本最高的一类故障。上了 TLS 之后同一个 auto 自动变成 Secure，不需要改配置。
+//
+// 空值（单测或工具没走 Load）按 auto 处理：零值不该让 Cookie 变成不可用。
+func secureFor(c *gin.Context) bool {
+	switch conf.EnvConfig().CookieSecureMode {
+	case "true":
+		return true
+	case "false":
+		return false
+	}
+	return requestIsHTTPS(c.Request)
+}
+
+// requestIsHTTPS 判定请求的实际协议。
+//
+// X-Forwarded-Proto 只在 auto 模式下用来**加**Secure：伪造它最多让攻击者自己的
+// Cookie 不被发回（自伤），不会让别人的会话降级，所以这里不依赖可信代理判定。
+func requestIsHTTPS(r *http.Request) bool {
+	if r == nil {
+		return false
+	}
+	if r.TLS != nil {
+		return true
+	}
+	if r.URL != nil && strings.EqualFold(r.URL.Scheme, "https") {
+		return true
+	}
+	// 多层代理会逗号追加（"https,http"），协议看最左那段。
+	xfp := r.Header.Get("X-Forwarded-Proto")
+	if i := strings.IndexByte(xfp, ','); i >= 0 {
+		xfp = xfp[:i]
+	}
+	return strings.EqualFold(strings.TrimSpace(xfp), "https")
 }

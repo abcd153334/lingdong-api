@@ -31,9 +31,9 @@ require_cmd awk
 log "构建镜像 tag=$TAG_ARG"
 ( cd "$DEPLOY_DIR" && TAG="$TAG_ARG" docker compose -f "$(basename "$COMPOSE_FILE")" build )
 
-backend_id="$(docker image inspect -f '{{.Id}}' "lingdong-api-backend:$TAG_ARG" 2>/dev/null || true)"
-web_id="$(docker image inspect -f '{{.Id}}' "lingdong-api-web:$TAG_ARG" 2>/dev/null || true)"
-[ -n "$backend_id" ] || die "构建后找不到 lingdong-api-backend:$TAG_ARG"
+IMG="$(app_image "$TAG_ARG")"
+backend_id="$(docker image inspect -f '{{.Id}}' "$IMG" 2>/dev/null || true)"
+[ -n "$backend_id" ] || die "构建后找不到镜像 $IMG"
 
 # data_epoch：DataMigration 集合的指纹（条数 + 名称哈希），拿不到就写 unknown，绝不编一个数字。
 #
@@ -70,8 +70,8 @@ commit="$(git -C "$ROOT_DIR" rev-parse HEAD 2>/dev/null || true)"
   echo "version=$TAG_ARG"
   echo "commit=$commit"
   echo "built_at=$(date '+%Y-%m-%d %H:%M:%S %z')"
-  echo "backend_image_id=$backend_id"
-  echo "web_image_id=$web_id"
+  echo "image=$IMG"
+  echo "image_id=$backend_id"
   echo "data_epoch=$epoch"
   echo "previous=$previous"
 } > "$DEPLOY_DIR/.release"

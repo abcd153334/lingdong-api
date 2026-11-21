@@ -51,7 +51,7 @@ require_docker() {
   require_cmd docker
   docker compose version >/dev/null 2>&1 || die "docker compose v2 不可用（需要 Docker Engine ≥24）"
   [ -f "$COMPOSE_FILE" ] || die "找不到编排文件：$COMPOSE_FILE"
-  [ -f "$ENV_FILE" ] || die "找不到 $ENV_FILE（先 cp deploy/.env.example deploy/.env）"
+  [ -f "$ENV_FILE" ] || die "找不到 $ENV_FILE（先执行 bash deploy/ld.sh init）"
 }
 
 # 解析出后端实际使用的 DSN：显式 DATABASE_URL 优先，否则按 POSTGRES_PASSWORD 派生。
@@ -72,4 +72,49 @@ sha256_of() {
   else
     shasum -a 256 "$1" | awk '{print $1}'
   fi
+}
+
+# 整套系统对外的宿主端口：.env 的 APP_PORT 优先（兼容旧键 WEB_PORT），否则 8088。
+# 只给「启动前」的检查用（此时容器还不存在，问不到 compose port）。
+resolve_app_port() {
+  local p; p="$(read_env APP_PORT '')"
+  [ -n "$p" ] || p="$(read_env WEB_PORT '')"
+  printf '%s' "${p:-8088}"
+}
+
+# 应用镜像的完整引用。镜像名只有一处定义（编排的默认值），脚本按同一规则拼，
+# 否则「tag-release 构建的名字」与「upgrade 检查的名字」会各写一份、迟早分叉。
+# 用户的私有仓库用 .env 里的 LD_IMAGE 覆盖（完整引用或"仓库名"两种写法都接受）。
+APP_IMAGE_REPO="ghcr.io/abcd153334/lingdong-api"
+
+app_image() {
+  local tag="${1:-latest}" explicit
+  explicit="$(read_env LD_IMAGE '')"
+  if [ -n "$explicit" ]; then
+    case "$explicit" in
+      *:*) printf '%s' "$explicit" ;;
+      *)   printf '%s:%s' "$explicit" "$tag" ;;
+    esac
+    return 0
+  fi
+  printf '%s:%s' "$APP_IMAGE_REPO" "$tag"
+}
+
+# 端口是否已被监听。三种探测手段按可用性降级：
+#   ss（Linux 默认有）→ lsof → /dev/tcp（bash 内建，最慢但一定能跑）。
+# 注意不要在 `set -e` 下直接用 /dev/tcp 的失败返回值，会整脚本退出。
+port_listening() {
+  local p="$1"
+  if command -v ss >/dev/null 2>&1; then
+    ss -lntH 2>/dev/null | awk '{print $4}' | grep -qE "[:.]${p}$"
+    return $?
+  fi
+  if command -v lsof >/dev/null 2>&1; then
+    lsof -nP -iTCP:"$p" -sTCP:LISTEN >/dev/null 2>&1
+    return $?
+  fi
+  if (exec 3<>"/dev/tcp/127.0.0.1/$p") >/dev/null 2>&1; then
+    return 0
+  fi
+  return 1
 }

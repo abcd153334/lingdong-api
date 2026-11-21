@@ -28,11 +28,16 @@ import (
 // nginx 丢端口与不压缩、preflight 假警报。
 // v2.1.5：LD_TRUSTED_PROXIES 默认值补 127.0.0.1/32 —— 缺了它，edge 与本机同机部署时
 // 所有公网用户的客户端 IP 都会退化成 127.0.0.1（限流/验证码/IP 白名单/审计全塌成一个）。
+// v2.2.0：部署形态收敛为「对标 new-api」——前端产物 go:embed 进二进制（单进程同时
+// 提供页面与 API），删掉 web/nginx 容器；容器 4→3，对外端口只剩 8088（APP_PORT）；
+// ld.sh init 自动生成密钥（0 手填）；LD_COOKIE_SECURE=auto 让明文入口也能登录；
+// 发布镜像由 GitHub Actions 推到 GHCR，用户端可 pull 而非 build。
+// entrypoint 层的静态缓存、gzip、安全头随之收回应用，那一整类「转发头配错」的故障消失。
 //
 // 必须是 var：发布流程用 `-ldflags -X` 把镜像标签注入进来，而链接器**只覆盖字符串
 // var**，对 const 静默忽略。写成 const 时打出来的镜像，`/api/health.version` 永远是
 // 源码里的字面量 —— 回滚时无法确认"跑的是哪个 tag"，发布也就不可追溯。
-var Version = "v2.1.5"
+var Version = "v2.2.0"
 
 var startTime = time.Now()
 

@@ -1,20 +1,20 @@
-# 灵动 API · 单机部署编排
-# 用法：
-#   cp deploy/.env.example deploy/.env   # 按需修改（口令与密钥无默认值，缺了直接拒绝启动）
-#   docker compose -f deploy/docker-compose.yml up -d
+# 灵动 API · 单机部署编排（v2.2.0）
 #
-# 配置入口只有一个：deploy/.env（下面用 env_file 整份注入）。
-# 以前这里逐个透传 environment，漏传的键（LD_TZ / LD_TRUSTED_PROXIES / LD_ALLOWED_ORIGINS /
-# LD_METRICS_* / LD_DIAG_HOLD_TOKEN）在 .env 里写了也不生效 —— 这类“配置明明写了”的故障
-# 只能靠翻容器 env 才能发现。现在 environment 只保留「缺了必须报错」和「需要推导默认值」的项。
+#   bash deploy/ld.sh up        # 一条命令：生成配置 → 起 3 个容器 → 等健康
 #
-# 端口一律绑 127.0.0.1：数据库、缓存、后端都只应通过反代或内网访问。
-# 绑 0.0.0.0 的后果不是"多暴露一个端口"，而是"Redis 匿名可写 + PG 弱口令可拖库"
-# —— 登录锁定、限流桶、worker leader 锁全在 Redis 里，可被直接清空。
+# 形态：**3 个容器** —— backend（Go 单进程，前端产物内嵌）、postgres、redis。
+# 对外只有**一个端口**：宿主 127.0.0.1:8088（`APP_PORT` 可改）。
+# 为什么只有一个：静态页与 API 在同一个进程里，同源，没有第二层反代，
+# 也就不存在「转发头配错导致登录 403」这一类故障。
 #
-# 镜像标签：TAG 不写时是 local（只用于本地开发，不参与回滚）。
-# 生产发布必须先跑 `bash deploy/scripts/tag-release.sh` 拿到明确 tag，再 `TAG=vX up -d`；
-# 理由：`latest`/`local` 无法回答"现在跑的是哪一版"。
+# 8088 只绑回环是刻意的：前面必须有一层终止 TLS 的入口，二选一
+#   ① 宝塔面板「网站 → 反向代理」→ http://127.0.0.1:8088   （见 deploy/edge/bt/）
+#   ② 独立 nginx（deploy/edge/nginx/ 模板 + certbot）        → 同上
+# 直接把 8088 暴露到公网 = 同一个站点以明文永久可达；prod 的会话 Cookie 只在
+# https 上回传，明文入口的后果是「登录 200、之后全 401」。
+#
+# 配置入口只有一个：deploy/.env（`ld.sh init` 自动生成，不需要手填）。
+# 所有键都从 env_file 整份注入，这里只保留「缺了必须报错」与「需要推导默认值」的项。
 name: lingdong-api
 
 services:
@@ -30,8 +30,11 @@ services:
       # 无默认值：缺了就拒绝启动，而不是静默使用公开的 lingdong/lingdong
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD 必须显式配置}
       POSTGRES_DB: ${POSTGRES_DB:-lingdong}
-    ports:
-      - "127.0.0.1:5432:5432"
+    # 不发布宿主端口：库只在 compose 网络内可达。排障用
+    # `docker compose exec postgres psql -U lingdong -d lingdong`，
+    # 备份/恢复脚本走的也是 exec，不需要宿主 5432。
+    expose:
+      - "5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:
@@ -53,12 +56,13 @@ services:
     container_name: lingdong-redis
     restart: unless-stopped
     stop_grace_period: 30s
-    # AOF 持久化 + 口令。没有口令时任何能连 6379 的进程都能 SET/DEL 限流键与 leader 锁。
+    # AOF 持久化 + 口令。没有口令时任何能连 6379 的进程都能 SET/DEL 限流键与 leader 锁
+    # ——登录锁定、全站限流、worker 选主全在这一个实例里。
     command: ["redis-server", "--appendonly", "yes", "--requirepass", "${REDIS_PASSWORD:?REDIS_PASSWORD 必须显式配置}"]
     environment:
       REDIS_PASSWORD: ${REDIS_PASSWORD:?REDIS_PASSWORD 必须显式配置}
-    ports:
-      - "127.0.0.1:6379:6379"
+    expose:
+      - "6379"
     volumes:
       - redisdata:/data
     healthcheck:
@@ -76,13 +80,16 @@ services:
       - lingdong
 
   backend:
+    # 优先用发布出来的镜像（用户端 `ld.sh up` 只 pull，几十秒起站）；
+    # 本地没有该标签时 compose 会自动 build（自建/离线场景不变）。
+    # 覆盖镜像：LD_IMAGE=registry.example.com/lingdong-api:vX
+    image: "${LD_IMAGE:-ghcr.io/abcd153334/lingdong-api:${TAG:-latest}}"
     build:
       context: ..
       dockerfile: deploy/backend.Dockerfile
       args:
         # 版本号注入（-X 只认 var，见 backend.Dockerfile）
         VERSION: "${TAG:-dev}"
-    image: "lingdong-api-backend:${TAG:-local}"
     container_name: lingdong-backend
     restart: unless-stopped
     # 优雅退出的最坏路径：HTTP 30s + worker drain 30s + calllog 5s ≈ 65s（见 main.go 关闭段）。
@@ -106,30 +113,32 @@ services:
       # 其余一切（模式、时区、代理、指标、留痕口径）都在 .env 里，不再逐项抄一遍。
       APP_ENV: "${APP_ENV:-prod}"
       DATABASE_URL: "${DATABASE_URL:-postgres://lingdong:${POSTGRES_PASSWORD:?}@postgres:5432/lingdong?sslmode=disable}"
-      # 单机编排里 Redis/PG 是 compose 服务名；接外部依赖时在 .env 里覆盖。
       REDIS_ADDR: "${REDIS_ADDR:-redis:6379}"
       REDIS_PASSWORD: "${REDIS_PASSWORD:?REDIS_PASSWORD 必须显式配置}"
       # APP_ENCRYPTION_KEY 没有默认值，故意用 `:?` 让 compose 直接报错退出：
       # 以前是 `:-0123...` 这种"公开示例值兜底"，忘了配就静默用公开密钥启动 ——
       # 等于任何人读过源码就能解开库内密文（渠道密钥、托管密钥、/v1/media 签名）。
-      APP_ENCRYPTION_KEY: "${APP_ENCRYPTION_KEY:?APP_ENCRYPTION_KEY 必须显式配置，生成方式：openssl rand -hex 32}"
-      # 反代网段：本编排里是 web 容器所在网段（若 edge 也跑在本机同一网络，它也在里面）。
-      # 不配的后果不是"少一条日志"：所有用户会塌进同一个限流桶，登录失败锁定也会互相误伤。
-      #
-      # **必须同时含 127.0.0.1/32**：edge（宝塔/宿主 nginx）通常把请求转给 web 容器发布的
-      # 127.0.0.1:8080 端口，web nginx 再用 $proxy_add_x_forwarded_for 追加一跳，追加进去的
-      # 是它看到的 $remote_addr —— 也就是 docker-proxy 的 127.0.0.1。后端按 Gin 的规则
-      # 从右往左找第一个"不可信"地址：不信任 127.0.0.1 时，取到的就是 127.0.0.1，
-      # 于是**每个公网用户都被当成同一个 IP**（限流、验证码升级、IP 白名单、审计 IP 全废）。
-      # 信任回环是安全的：能伪造 XFF 的只有宿主机上的本机进程，而它们本来就在信任圈内。
-      # 用 172.29/24 而不是 172.28/24 —— 集群编排已占用 172.28。
+      APP_ENCRYPTION_KEY: "${APP_ENCRYPTION_KEY:?APP_ENCRYPTION_KEY 必须显式配置，ld.sh init 会自动生成}"
+      # 会话 Cookie 的 Secure 属性：auto（默认）按请求实际协议决定 ——
+      # https 走 Secure，明文 http 不加。这样「先在本机 http 验证」与「生产上 TLS」
+      # 用同一份配置，不需要用户改环境变量；生产明文时启动日志会打 WARN。
+      LD_COOKIE_SECURE: "${LD_COOKIE_SECURE:-auto}"
+      # 反代网段。**必须含 127.0.0.1/32**：宝塔/宿主 nginx 把请求转给发布的
+      # 127.0.0.1:8088 时，docker-proxy 让容器看到的是 127.0.0.1，并由它追加进 XFF。
+      # 后端按 Gin 的规则从右往左找第一个"不可信"地址：不信任回环时取到的就是回环，
+      # 于是**每个公网用户都被当成同一个 IP**（限流、验证码升级、IP 白名单、审计全废）。
+      # 信任回环是安全的：能伪造 XFF 的只有宿主机上的本机进程。
+      # 入口在另一台机器时，把那台机器的地址也加进 .env 的 LD_TRUSTED_PROXIES。
       LD_TRUSTED_PROXIES: "${LD_TRUSTED_PROXIES:-172.29.0.0/24,127.0.0.1/32}"
-      # 本地文件存储根目录（storage.active=none 时的落盘路径），挂载到命名卷以便重建后保留。
       STORAGE_DIR: "${STORAGE_DIR:-/app/data}"
       # 演示数据默认不写；想在本机看演示数据时在 .env 里改成 1。
       LD_SEED_ENABLED: "${LD_SEED_ENABLED:-0}"
+    # 整套系统**唯一**的宿主端口。
+    # 换端口只改 .env 的 APP_PORT，不要改这一行 —— 脚本、体检、文档读同一个变量。
+    #
+    # 仍绑回环：前面必然还有一层终止 TLS 的入口（宝塔反代 / deploy/edge/ 的独立 nginx）。
     ports:
-      - "127.0.0.1:8080:8080"
+      - "127.0.0.1:${APP_PORT:-8088}:8080"
     volumes:
       - storagedata:/app/data
     healthcheck:
@@ -145,40 +154,6 @@ services:
       options:
         max-size: "50m"
         max-file: "5"
-    networks:
-      - lingdong
-
-  web:
-    build:
-      context: ..
-      dockerfile: deploy/web.Dockerfile
-    image: "lingdong-api-web:${TAG:-local}"
-    container_name: lingdong-web
-    restart: unless-stopped
-    stop_grace_period: 30s
-    depends_on:
-      # 用 service_started 而不是 service_healthy：backend 的 healthcheck 是 deep（含 Redis），
-      # 冷启动时 Redis 抖动会让 backend 永远不 healthy，于是 web 根本不启动 —— 门户整站打不开。
-      # 正确的分层是：容器存活看浅探针，对外就绪看 deep（LB/值班用），两者不要混。
-      backend:
-        condition: service_started
-    # 只绑回环：对外入口是边缘 nginx（443 终止 TLS）→ 本机；边缘配置不在本仓提供。
-    # 宿主 80 直接对外时，同一个站点会同时以明文可达 —— HSTS 也救不了第一次访问。
-    # 5173 是开发时用的第二个入口，已移到 docker-compose.override.example.yml。
-    ports:
-      - "127.0.0.1:80:80"
-    healthcheck:
-      # nginx 仅监听 IPv4（0.0.0.0:80），容器内 localhost 解析到 ::1 会连接被拒，故用 127.0.0.1
-      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1/ >/dev/null 2>&1 || exit 1"]
-      interval: 10s
-      timeout: 5s
-      retries: 6
-      start_period: 10s
-    logging:
-      driver: json-file
-      options:
-        max-size: "20m"
-        max-file: "3"
     networks:
       - lingdong
 

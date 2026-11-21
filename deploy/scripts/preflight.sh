@@ -1,10 +1,14 @@
 #!/usr/bin/env bash
-# 部署前体检：把"起不来/起来也不对"的配置问题在启动前全部打出来。
+# 部署前体检：只查「查出来能立刻改」的项。
 #
-# 设计原则：每条检查只回答一个可执行的问题，失败必须给出**怎么改**，
-# 不做"看起来专业但查不出东西"的泛化检查。缺 docker 时用 SKIP_DOCKER=1 跳过编排校验。
+# 设计原则：一条检查只回答一个可执行的问题，失败必须给出**怎么改**。
+# 刻意不做的三类（以前做过，全是噪音）：
+#   - 端口占用：`docker compose up` 会报 `address already in use`，信息一样清楚；
+#   - 磁盘余量：只报 FAIL 不给动作，`df -h` 本来就在手边；
+#   - 编排语法：`docker compose config -q` 一条命令的事，不需要包一层。
 #
 # 用法：bash deploy/scripts/preflight.sh
+#       SKIP_DOCKER=1 时跳过编排校验（只改文档/脚本的机器用）。
 
 source "$(dirname "${BASH_SOURCE[0]}")/lib/common.sh"
 
@@ -12,7 +16,7 @@ FAILED=0
 pass() { ok "$*"; }
 fail() { printf '  \033[31mFAIL\033[0m %s\n' "$*"; FAILED=$((FAILED + 1)); }
 
-[ -f "$ENV_FILE" ] || die "找不到 $ENV_FILE —— 先执行：cp deploy/.env.example deploy/.env"
+[ -f "$ENV_FILE" ] || die "找不到 $ENV_FILE —— 先执行：bash deploy/ld.sh init"
 
 log "部署前体检：$ENV_FILE"
 
@@ -40,7 +44,7 @@ esac
 for k in APP_ENV POSTGRES_PASSWORD REDIS_PASSWORD APP_ENCRYPTION_KEY; do
   v="$(read_env "$k" '')"
   if [ -z "$v" ]; then
-    fail "必填项 $k 为空 —— 缺它 compose 会直接拒绝启动"
+    fail "必填项 $k 为空 —— 缺它 compose 会直接拒绝启动（重跑 bash deploy/ld.sh init 可补齐）"
   else
     pass "$k 已配置"
   fi
@@ -57,17 +61,16 @@ esac
 
 key="$(read_env APP_ENCRYPTION_KEY '')"
 if [ -n "$key" ]; then
-  # 公开示例值必须与本表同步：backend/internal/conf/secrets.go 的 publicSecretValues。
-  # 历史事故：这里比对的是另一个字面量，于是"用公开示例值部署"体检显示 pass，
+  # 公开示例值必须与 backend/internal/conf/secrets.go 的 publicSecretValues 同步。
+  # 历史事故：两处字面量不同，于是"用公开示例值部署"体检显示 pass，
   # 而后端 ValidateSecrets 在 prod 直接拒绝启动 —— 体检绿灯、服务起不来。
   if [ "$key" = "0123456789abcdef0123456789abcdef" ]; then
     fail "APP_ENCRYPTION_KEY 是公开示例值 —— 等于把库内密文交给任何读过源码的人"
   elif [ "${#key}" -lt 16 ]; then
     # 硬下限 16 与后端一致（服务端 SHA-256 派生，任意长度可用，门槛只防"没有熵"）。
-    # 卡到 32 会让现网 24 字符密钥的部署升级即起不来。
-    fail "APP_ENCRYPTION_KEY 只有 ${#key} 位，至少 16 位（建议 openssl rand -hex 32）"
+    fail "APP_ENCRYPTION_KEY 只有 ${#key} 位，至少 16 位（bash deploy/ld.sh init 会生成 64 位）"
   elif [ "${#key}" -lt 32 ]; then
-    warn "APP_ENCRYPTION_KEY 为 ${#key} 位：能正常派生，但建议至少 32 位（openssl rand -hex 32 生成 64 位）"
+    warn "APP_ENCRYPTION_KEY 为 ${#key} 位：能正常派生，但建议至少 32 位"
   else
     pass "APP_ENCRYPTION_KEY 长度 ${#key}"
   fi
@@ -79,12 +82,12 @@ if [ -n "$pgpw" ]; then
     *[!A-Za-z0-9_-]*) fail "POSTGRES_PASSWORD 含 URL 保留字符（只允许 A-Za-z0-9_-）：@ : / ? # 会把 DATABASE_URL 拼坏" ;;
     *) pass "POSTGRES_PASSWORD 字符集合法" ;;
   esac
-  [ "${#pgpw}" -ge 16 ] || fail "POSTGRES_PASSWORD 只有 ${#pgpw} 位，建议 ≥16（openssl rand -hex 16）"
+  [ "${#pgpw}" -ge 16 ] || fail "POSTGRES_PASSWORD 只有 ${#pgpw} 位，建议 ≥16"
 fi
 
 redispw="$(read_env REDIS_PASSWORD '')"
 if [ -n "$redispw" ] && [ "${#redispw}" -lt 12 ]; then
-  fail "REDIS_PASSWORD 只有 ${#redispw} 位，建议 ≥12（它保护的是限流键与 leader 锁）"
+  fail "REDIS_PASSWORD 只有 ${#redispw} 位，建议 ≥12（它保护限流键与 leader 锁）"
 fi
 
 # ---------- 4. 口令单一真相源 ----------
@@ -94,19 +97,18 @@ if [ -n "$dsn_explicit" ] && [ -n "$pgpw" ]; then
     *"@postgres:5432"*)
       case "$dsn_explicit" in
         *":${pgpw}@"*) pass "DATABASE_URL 与本机 POSTGRES_PASSWORD 一致" ;;
-        *) fail "DATABASE_URL 里的口令与 POSTGRES_PASSWORD 不一致 —— 两个真相源，后端会连库失败。建议注释掉 DATABASE_URL 让它自动派生" ;;
+        *) fail "DATABASE_URL 里的口令与 POSTGRES_PASSWORD 不一致 —— 两个真相源，后端会连库失败。注释掉 DATABASE_URL 让它自动派生" ;;
       esac
       ;;
     *) pass "DATABASE_URL 指向外部库（跳过一致性检查）" ;;
   esac
 fi
 
-# ---------- 5. 反代与模式 ----------
+# ---------- 5. 反代与入口 ----------
 #
-# .env 里不写 LD_TRUSTED_PROXIES 是**推荐**姿势：编排给了与 subnet 配对的默认值
-# （LD_TRUSTED_PROXIES=${LD_TRUSTED_PROXIES:-172.29.0.0/24}）。只读 .env 的写法
-# 于是让每一次默认部署都报一条「为空」—— 假警告叫得多了，真警告就没人看。
-# 这里按「容器实际拿到的值」判断：先 .env，再 compose 解析结果。
+# .env 不写 LD_TRUSTED_PROXIES 是**推荐**姿势：编排给了与 subnet 配对的默认值。
+# 所以这里按「容器实际拿到的值」判断（先 .env，再 compose 解析结果）——
+# 只读 .env 会让每次默认部署都报一条假警告，假警告多了真警告就没人看。
 tp="$(read_env LD_TRUSTED_PROXIES '')"
 tp_src=".env"
 if [ -z "$tp" ] && command -v docker >/dev/null 2>&1 && docker compose version >/dev/null 2>&1; then
@@ -130,59 +132,47 @@ if [ -n "$tp" ]; then
         ;;
     esac
   done
+  # 回环必须在列表里：入口（宝塔/宿主 nginx）转到发布的 127.0.0.1:8088 时，
+  # 容器看到的是 docker-proxy 的回环地址并由它追加 XFF；不信任回环，
+  # 每个公网用户都会被当成同一个 IP（限流、验证码升级、IP 白名单、审计全废）。
+  case ",$tp," in
+    *,127.0.0.1/32,*|*,127.0.0.1,*) : ;;
+    *) warn "LD_TRUSTED_PROXIES 未含 127.0.0.1/32：同机入口部署下，所有用户会塌成同一个 IP" ;;
+  esac
   if [ "$bad" -eq 0 ]; then pass "LD_TRUSTED_PROXIES 合法（$tp_src）：$tp"; fi
 else
   warn "LD_TRUSTED_PROXIES 为空：只适用于「直连」部署；经反代时所有用户会塌进同一个限流桶"
 fi
 
-# APP_ENV=prod 时会话 Cookie 带 Secure，浏览器**不会**在 http:// 上回传它。
-# 这一点在真机上表现为最难自查的一种故障：登录接口 200、紧接着所有请求 401，
-# 用户以为「登录成功了又掉线」，运维以为是会话存储坏了。
-if [ "$(read_env APP_ENV '')" = "prod" ]; then
-  warn "APP_ENV=prod：会话 Cookie 带 Secure，只经 HTTPS 回传。"
-  warn "  用 http://IP:端口 直连会「登录成功但立刻掉线」——对外必须先做 TLS 终止（443 或反代到本机）。"
-fi
+# Cookie 的 Secure 由 LD_COOKIE_SECURE 决定（默认 auto：按请求实际协议）。
+# 这条提示只在「prod + 强制 secure」时才有意义，因为那才真的要求 TLS。
+cookie_mode="$(read_env LD_COOKIE_SECURE 'auto')"
+case "$cookie_mode" in
+  auto) pass "LD_COOKIE_SECURE=auto（https 自动加 Secure，明文入口不加）" ;;
+  true) [ "$(port_listening 443 >/dev/null 2>&1 && echo 1 || echo 0)" = "1" ] \
+          && pass "LD_COOKIE_SECURE=true 且 443 有监听" \
+          || warn "LD_COOKIE_SECURE=true 但 443 没有监听：浏览器不会在 http:// 上回传会话 Cookie，登录会「成功但立刻掉线」" ;;
+  false) warn "LD_COOKIE_SECURE=false：会话 Cookie 不带 Secure，仅用于临时验证，生产不要这么配" ;;
+  *) fail "LD_COOKIE_SECURE=$cookie_mode 非法（auto|true|false）" ;;
+esac
 
 mode="$(read_env LD_NODE_MODE 'full')"
 case "$mode" in full|api) pass "LD_NODE_MODE=$mode" ;; *) fail "LD_NODE_MODE=$mode 非法（full|api）" ;; esac
 
-cm="$(read_env LD_CLUSTER_MODE '0')"
-case "$cm" in 0|1) pass "LD_CLUSTER_MODE=$cm" ;; *) fail "LD_CLUSTER_MODE=$cm 非法（0|1）" ;; esac
-
-# 改了 compose 网段却没改可信代理：两者不一致时客户端 IP 会取错（全站一个限流桶）
-subnet="$(read_env LD_SUBNET '')"
-if [ -n "$subnet" ] && [ -z "$tp" ]; then
-  warn "LD_SUBNET=$subnet 但 LD_TRUSTED_PROXIES 为空：后端不会信任该网段，客户端 IP 会退化成代理 IP"
-fi
-
-# ---------- 6. 资源 ----------
-minfree="$(read_env LD_CAPACITY_MIN_FREE_GB '5')"
-avail_kb="$(df -Pk "$DEPLOY_DIR" | awk 'NR==2{print $4}')"
-if [ -n "$avail_kb" ]; then
-  avail_gb=$((avail_kb / 1024 / 1024))
-  if [ "$avail_gb" -lt "$minfree" ]; then
-    fail "磁盘剩余 ${avail_gb}GB < LD_CAPACITY_MIN_FREE_GB=${minfree}GB"
-  else
-    pass "磁盘剩余 ${avail_gb}GB"
-  fi
-fi
-
-# ---------- 7. 编排可解析 ----------
+# ---------- 6. 编排可解析 ----------
 if [ "${SKIP_DOCKER:-0}" = "1" ]; then
   warn "SKIP_DOCKER=1：跳过 docker/compose 校验"
 elif ! command -v docker >/dev/null 2>&1; then
-  fail "找不到 docker —— 本机只做文档/脚本改动时用 SKIP_DOCKER=1；目标机必须装 Docker ≥24"
-else
-  if docker compose version >/dev/null 2>&1; then
-    pass "docker compose v2 可用"
-    if ( cd "$DEPLOY_DIR" && docker compose -f "$(basename "$COMPOSE_FILE")" config -q ) 2>/tmp/ld-compose.err; then
-      pass "编排文件可解析（docker compose config）"
-    else
-      fail "编排文件无法解析：$(head -3 /tmp/ld-compose.err | tr '\n' ' ')"
-    fi
+  fail "找不到 docker —— 只改文档/脚本的机器用 SKIP_DOCKER=1；目标机必须装 Docker ≥24"
+elif docker compose version >/dev/null 2>&1; then
+  pass "docker compose v2 可用"
+  if ( cd "$DEPLOY_DIR" && docker compose -f "$(basename "$COMPOSE_FILE")" config -q ) 2>/tmp/ld-compose.err; then
+    pass "编排文件可解析（docker compose config）"
   else
-    fail "docker compose v2 不可用"
+    fail "编排文件无法解析：$(head -3 /tmp/ld-compose.err | tr '\n' ' ')"
   fi
+else
+  fail "docker compose v2 不可用"
 fi
 
 echo

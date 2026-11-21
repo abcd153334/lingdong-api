@@ -5,9 +5,13 @@
 # 本脚本是「哪些文件能进仓库」的唯一判据——不接受「我看过了没问题」。
 #
 # 查五件事：
-#   1. 顶层只允许代码目录（backend/web/deploy/scripts + 四个元信息文件）
-#   2. 明确的禁止路径（文档、厂商资料、原型、备份、第三方副本、内部基础设施）
-#   3. .md 只允许编译/测试必需的那几个（go:embed 的 skill、apidoc 夹具、根 README）
+#   1. 顶层只允许代码目录（.github/backend/web/deploy/scripts + 四个元信息文件）
+#   2. 明确的禁止路径（交付文档、厂商资料、原型、备份、第三方副本、内部基础设施）
+#   3. .md 只允许两类：
+#      a) 编译/测试必需（go:embed 的 skill、apidoc 夹具、根 README）；
+#      b) **部署文档**（deploy/README.md、deploy/edge/**、deploy/agent/**）——
+#         目标是「克隆即可自助部署」：部署手册必须跟代码同版本、同一次 clone。
+#         这类文档只写操作步骤与模板，不写生产域名/IP/凭据（第 4 节逐条扫）。
 #   4. 敏感值：私钥块、云厂商 AK、预签名 URL 凭据、生产域名、个人邮箱、已知口令
 #   5. 误产物：无扩展名散落文件、%XX 编码文件名
 #
@@ -25,7 +29,7 @@ section() { printf '\n\033[1m%s\033[0m\n' "$1"; }
 
 # ---------- 1. 顶层白名单 ----------
 section "1/5 顶层范围"
-ALLOWED_TOP='^(backend|web|deploy|scripts|testdata)/'
+ALLOWED_TOP='^(\.github|backend|web|deploy|scripts|testdata)/'
 ALLOWED_ROOT='^(README\.md|\.gitignore|\.gitattributes|\.dockerignore)$'
 bad_top=$(git ls-files | grep -vE "$ALLOWED_TOP" | grep -vE "$ALLOWED_ROOT")
 if [ -n "$bad_top" ]; then
@@ -38,7 +42,7 @@ fi
 
 # ---------- 2. 禁止路径 ----------
 section "2/5 禁止路径"
-DENY='^(docs/|API文档/|prototype/|lab/|data/|evidence/|outputs/|xunhupay-master/|new-api/|源代码|\.trae/|\.workbuddy/|deploy/edge/|deploy/backups/|deploy/\.release|scripts/dev[^/]*\.ps1$|scripts/setup-pg-user\.ps1$|scripts/live-rebuild\.py$|scripts/reset-doc-groups\.ps1$|scripts/duomi-nano-protocol\.sql$|scripts/gen-docs-fixtures\.mjs$|deploy/scripts/check-docs\.sh$|deploy/scripts/gen-env-doc\.sh$|deploy/README\.md$|deploy/agent/README\.md$)'
+DENY='^(docs/|API文档/|prototype/|lab/|data/|evidence/|outputs/|xunhupay-master/|new-api/|源代码|\.trae/|\.workbuddy/|deploy/backups/|deploy/\.release|scripts/dev[^/]*\.ps1$|scripts/setup-pg-user\.ps1$|scripts/live-rebuild\.py$|scripts/reset-doc-groups\.ps1$|scripts/duomi-nano-protocol\.sql$|scripts/gen-docs-fixtures\.mjs$|deploy/scripts/check-docs\.sh$|deploy/scripts/gen-env-doc\.sh$)'
 bad_path=$(git ls-files | grep -E "$DENY")
 if [ -n "$bad_path" ]; then
   while IFS= read -r f; do report "禁止入库: $f"; done <<< "$(echo "$bad_path" | head -20)"
@@ -50,7 +54,7 @@ fi
 
 # ---------- 3. .md 白名单 ----------
 section "3/5 文档白名单"
-MD_ALLOWED='^(backend/internal/service/agent/skill/[^/]+\.md|backend/internal/apidoc/testdata/[^/]+\.md|README\.md)$'
+MD_ALLOWED='^(README\.md|deploy/README\.md|deploy/edge/[^/]*\.md|deploy/edge/[^/]+/[^/]*\.md|deploy/optional/[^/]+/[^/]*\.md|backend/internal/service/agent/skill/[^/]+\.md|backend/internal/apidoc/testdata/[^/]+\.md)$'
 bad_md=$(git ls-files '*.md' | grep -vE "$MD_ALLOWED")
 if [ -n "$bad_md" ]; then
   while IFS= read -r f; do report "多余文档: $f"; done <<< "$(echo "$bad_md" | head -20)"
@@ -103,5 +107,5 @@ if [ "$violations" -eq 0 ]; then
   exit 0
 fi
 printf '\033[31m门禁未通过：%d 处违规\033[0m\n' "$violations"
-printf '规则见 docs/工程铁律-项目长期约定.md 的「公开仓白名单」。\n'
+printf '规则见本脚本头部注释（五节检查）与 .gitattributes。\n'
 exit 1

@@ -456,7 +456,7 @@ func TestDuomiSyncImageWaitEnv(t *testing.T) {
 
 // TestDuomiSyncImageWaitBelowProxy 守住「应用层必须先于反向代理返回」这条约束。
 //
-// 反向代理（deploy/nginx.conf）的 proxy_read_timeout 是 960s，应用上限一旦 ≥ 它，
+// 反向代理（入口层模板）的 proxy_read_timeout 是 960s，应用上限一旦 ≥ 它，
 // 应用算出的结果就写不出去：客户端只会拿到 nginx 的 504 HTML，而调用记录里可能是
 // 200 settled —— 这正是"上游成功、系统成功、用户 504"的成因。
 func TestDuomiSyncImageWaitBelowProxy(t *testing.T) {

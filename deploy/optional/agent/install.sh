@@ -3,12 +3,12 @@
 #
 # 为什么装到 /opt/lingdong/updater 而不是仓库里：一次更新会 `git checkout` 整个工作区，
 # 而 bash 是边读边执行的 —— 正在运行的脚本文件被改写会读到半截语句。
-# 仓库里的 deploy/agent/ 只是发布源，运行副本必须在仓库之外。
+# 仓库里的 deploy/optional/agent/ 只是发布源，运行副本必须在仓库之外。
 #
 # 用法：
-#   bash deploy/agent/install.sh --repo /opt/lingdong/app
-#   bash deploy/agent/install.sh --repo /opt/lingdong/app --interval 10
-#   bash deploy/agent/install.sh --uninstall
+#   bash deploy/optional/agent/install.sh --repo /opt/lingdong/app
+#   bash deploy/optional/agent/install.sh --repo /opt/lingdong/app --interval 10
+#   bash deploy/optional/agent/install.sh --uninstall
 
 set -euo pipefail
 

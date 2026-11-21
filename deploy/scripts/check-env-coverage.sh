@@ -37,6 +37,9 @@ LD_DUOMI_NEW_MODELS      适配器内部开关
 LD_RECLAIM_NO_EVIDENCE   回收策略内部开关
 LD_SUBMIT_IDEMPOTENT     提交幂等内部开关
 LD_TASK_USAGE_SETTLE     任务结算内部开关
+APP_PORT                 编排层宿主端口（compose 用，Go 不读）
+POSTGRES_PASSWORD        编排层库口令（compose 用，Go 读 DATABASE_URL）
+REDIS_PASSWORD           编排层 Redis 口令（compose 用，Go 读同名变量时也用它）
 "
 
 code_vars="$(cd "$ROOT_DIR/backend" && grep -rhoE '(os\.Getenv|getenv[A-Za-z]*)\("[A-Z0-9_]+"' \
@@ -63,7 +66,7 @@ fi
 ghost="$(comm -13 <(printf '%s\n' "$code_vars") <(printf '%s\n' "$tpl_vars") | while read -r v; do
   [ -n "$v" ] || continue
   # compose 层变量（PG/网络）由编排读取，Go 不读属正常
-  case "$v" in POSTGRES_*|LD_SUBNET) continue ;; esac
+  case "$v" in POSTGRES_*|LD_SUBNET|APP_PORT) continue ;; esac
   # 通过常量间接读取的变量
   case "$v" in LD_BOOTSTRAP_ADMIN_PASSWORD|LD_DB_MAX_OPEN|LD_DB_MAX_IDLE) continue ;; esac
   echo "$v"
