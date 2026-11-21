@@ -27,7 +27,7 @@ import (
 // 历史上这里是 "123456" 的 bcrypt 摘要，且 seedAdmin 不受 LD_SEED_ENABLED 约束 ——
 // 每一个全新库（含生产）开箱即带一个口令公开的超管。现在改为：
 //   - 配了 LD_BOOTSTRAP_ADMIN_PASSWORD 就用它（运维显式选择，不强制改密，避免打断脚本）；
-//   - 没配就随机生成 24 字节口令，**只在首次建号时打印一次**，并置 must_change_password。
+//   - 没配就用内置出厂值 admin123，并置 must_change_password（首登强制改密）。
 //
 // 无论哪种来源，口令都不落仓库、不进镜像。
 const bootstrapAdminEnv = "LD_BOOTSTRAP_ADMIN_PASSWORD"

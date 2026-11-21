@@ -37,7 +37,7 @@ import (
 // 必须是 var：发布流程用 `-ldflags -X` 把镜像标签注入进来，而链接器**只覆盖字符串
 // var**，对 const 静默忽略。写成 const 时打出来的镜像，`/api/health.version` 永远是
 // 源码里的字面量 —— 回滚时无法确认"跑的是哪个 tag"，发布也就不可追溯。
-var Version = "v2.2.5"
+var Version = "v2.2.6"
 
 var startTime = time.Now()
 

@@ -61,9 +61,9 @@ type User struct {
 	// 双真相源，只能靠回收时手工同步 —— 任何一处漏同步都永久漂移。
 	// MustChangePassword 表示当前口令是「系统给的初始口令」，必须先改密才能用其它功能。
 	//
-	// 为什么需要它：默认超管的初始口令只可能来自环境变量或随机生成，
-	// 两者都属于"一次性的交接凭证"。没有这个标记时，随机口令一旦被日志/截图带出，
-	// 就会长期有效，而系统里没有任何机制要求它被替换。
+	// 为什么需要它：默认超管的初始口令是内置出厂值（admin123）或运维在环境变量里指定的，
+	// 前者写在仓库文档里、人人可见。没有这个标记时，这类口令一旦部署完就长期有效，
+	// 而系统里没有任何机制要求它被替换。
 	MustChangePassword bool           `gorm:"not null;default:false"`
 	CreatedAt          time.Time      `gorm:"type:timestamptz"`
 	UpdatedAt          time.Time      `gorm:"type:timestamptz"`

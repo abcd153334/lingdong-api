@@ -166,7 +166,7 @@ export function Login() {
     // 否则会走成「登录 → /home → 403 → 回登录」。
     const open = await loadPortalMode(true);
 
-    // 初始口令（系统随机生成，只打印过一次）必须先改：
+    // 出厂口令（内置 admin123，写在 README 里）必须先改：
     // 后端对所有业务端点返 403 password_change_required，这里直接送去改密页，
     // 免得用户登录后看到一片"接口报错"。
     if (me?.must_change_password) {
