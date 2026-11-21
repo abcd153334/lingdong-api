@@ -397,3 +397,55 @@ func TestPluginRecordRejectsForeignApp(t *testing.T) {
 		t.Fatalf("不存在的应用应 404，实际 %d: %s", rec.Code, rec.Body.String())
 	}
 }
+
+// TestDevDocHandlerServesGeneratedManual 开发手册的 HTTP 契约。
+//
+// 这条不需要数据库：手册完全由 devdoc 从常量渲染，所以"能不能下载"与插件数据无关。
+// 断言四件事：状态码、内容类型、附件头（含 RFC 5987 的中文名）、ETag 命中 304。
+//
+// 必须走 engine.ServeHTTP 而不是直接调 handler：gin 的 c.Status(304) 只写
+// Writermem，直到 WriteHeaderNow 才落到 ResponseRecorder —— 直接调会一直读到 200。
+func TestDevDocHandlerServesGeneratedManual(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	r := gin.New()
+	r.GET("/api/admin/app-plugins/dev-doc.md", AdminAppPluginDevDoc)
+
+	get := func(ifNoneMatch string) *httptest.ResponseRecorder {
+		req := httptest.NewRequest(http.MethodGet, "/api/admin/app-plugins/dev-doc.md", nil)
+		if ifNoneMatch != "" {
+			req.Header.Set("If-None-Match", ifNoneMatch)
+		}
+		w := httptest.NewRecorder()
+		r.ServeHTTP(w, req)
+		return w
+	}
+
+	rec := get("")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("状态码应为 200，实际 %d", rec.Code)
+	}
+	if ct := rec.Header().Get("Content-Type"); !strings.HasPrefix(ct, "text/markdown") {
+		t.Fatalf("内容类型应为 markdown，实际 %q", ct)
+	}
+	// 同时给 ASCII 兜底名与 RFC 5987 的中文名：老客户端拿前者，新客户端拿后者。
+	cd := rec.Header().Get("Content-Disposition")
+	if !strings.Contains(cd, `filename="plugin-dev-manual.md"`) || !strings.Contains(cd, "filename*=UTF-8''") {
+		t.Fatalf("附件头应同时含 ASCII 名与 filename*，实际 %q", cd)
+	}
+	if !strings.HasPrefix(rec.Body.String(), "# 应用插件开发手册") {
+		t.Fatalf("正文应是手册正文，实际开头 %q", rec.Body.String()[:40])
+	}
+
+	// 同一份内容再请求一次（带 ETag）应 304：反复下载不该重传二十多 KB。
+	tag := rec.Header().Get("ETag")
+	if tag == "" {
+		t.Fatal("应下发 ETag")
+	}
+	again := get(tag)
+	if again.Code != http.StatusNotModified {
+		t.Fatalf("ETag 命中应 304，实际 %d", again.Code)
+	}
+	if again.Body.Len() != 0 {
+		t.Fatalf("304 不应带 body，实际 %d 字节", again.Body.Len())
+	}
+}

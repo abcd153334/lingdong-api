@@ -1,5 +1,5 @@
 /**
- * 接入应用（卡片列表 + 管理弹窗）：契约级 stub。
+ * 应用管理（卡片列表 + 管理弹窗）：契约级 stub。
  *
  * 与旧版的区别：列表不再是表格（`.tbl` 9 列），而是卡片 + 弹窗六页签。
  * 这里守的是**请求契约**（打到哪个端点、带什么 body）与关键交互
@@ -210,15 +210,15 @@ async function stub(page: Page, captured: Captured[]) {
   });
 }
 
-test.describe("接入应用（卡片 + 弹窗）", () => {
+test.describe("应用管理（卡片 + 弹窗）", () => {
   test("卡片列表：两张卡、状态徽标并列、聚合口径、侧栏与面包屑同步", async ({ page }) => {
     await seedAdmin(page);
     await stub(page, []);
     await page.goto("/admin/apps");
 
-    await expect(page.getByRole("heading", { level: 1 })).toHaveText("接入应用");
-    await expect(page.locator(".a-side nav a.active")).toContainText("接入应用");
-    await expect(page.locator(".a-top .crumb b")).toHaveText("接入应用");
+    await expect(page.getByRole("heading", { level: 1 })).toHaveText("应用管理");
+    await expect(page.locator(".a-side nav a.active")).toContainText("应用管理");
+    await expect(page.locator(".a-top .crumb b")).toHaveText("应用管理");
 
     const cards = page.locator('[data-testid="app-card"]');
     await expect(cards).toHaveCount(2);
@@ -266,7 +266,7 @@ test.describe("接入应用（卡片 + 弹窗）", () => {
     });
   });
 
-  test("管理弹窗：六个页签可切换，概览给出标识与危险区", async ({ page }) => {
+  test("管理弹窗：五个页签可切换，概览给出身份、指标与危险区", async ({ page }) => {
     await seedAdmin(page);
     await stub(page, []);
     await page.goto("/admin/apps");
@@ -279,15 +279,43 @@ test.describe("接入应用（卡片 + 弹窗）", () => {
     await expect(dlg).toBeVisible();
 
     // 页签清单必须包含第六个「插件」：漏了它，新增页签被裁也不会红。
-    for (const name of ["概览", "品牌", "公告", "版本", "在线", "插件"]) {
-      await expect(dlg.getByRole("tab", { name })).toBeVisible();
+    for (const name of ["概览", "品牌", "公告", "版本", "插件"]) {
+      await expect(dlg.getByRole("tab", { name, exact: true })).toBeVisible();
     }
+    // ---- 结构：页签住顶栏，不再单独占一行 ----
+    await expect(dlg.locator(".dl-head").getByRole("tablist")).toHaveCount(1);
+    // 顶栏是**下划线**页签（不是胶囊）：胶囊那套底色 + 描边在这一档已被淘汰
+    await expect(dlg.locator(".dl-head .tabs")).toHaveCount(1);
+    await expect(dlg.locator(".dl-head .pill-tabs")).toHaveCount(0);
+    // 顶栏**没有标题**：名字只走 aria-label（`getByRole("dialog", { name })` 仍命中）
+    await expect(dlg.locator(":scope > .dl-head > .dl-title")).toHaveCount(0);
+    // 旧的吸附层必须彻底消失：留着它就是"页签另起一行"
+    await expect(dlg.locator(".page-tabs-bar")).toHaveCount(0);
+    // 页签写在 DOM 里的顺序 = 视觉顺序：静态五项，然后「插件」清单
+    expect(
+      await dlg.getByRole("tab").evaluateAll((els) => els.map((e) => e.getAttribute("aria-label"))),
+    ).toEqual(["概览", "品牌", "公告", "版本", "插件"]);
+    // 「插件」恒靠最右：页签条还有空位时必须顶到右缘（不是紧跟「版本」）
+    {
+      const tl = (await dlg.getByRole("tablist", { name: "应用管理" }).boundingBox())!;
+      const pin = (await dlg.getByRole("tab", { name: "插件", exact: true }).boundingBox())!;
+      expect(tl.x + tl.width - (pin.x + pin.width), "「插件」没有靠最右").toBeLessThanOrEqual(2);
+    }
+
+    // ---- 底栏已移除：关闭只剩右上角 X（+ Esc + 遮罩） ----
+    // `:scope >` 是必须的：编辑弹窗也挂在同一个 dialog 的 DOM 里，
+    // 它自带 .dl-head/.dl-foot，不限定就会把内层的底栏算到自己头上。
+    await expect(dlg.locator(":scope > .dl-foot")).toHaveCount(0);
+    await expect(dlg.locator(":scope > .dl-head > .dl-close")).toHaveCount(1);
+
     // 概览：应用标识不可改 + 停用入口在弹窗里（不在卡片上）
     // 断言限定在「概览」面板内：编辑基本信息弹窗也在同一个 dialog 的 DOM 里
     // （关闭态 visibility:hidden），不限定会命中两个 .mono。
     const overview = dlg.getByRole("tabpanel", { name: "概览" });
     await expect(overview.locator(".mono", { hasText: "web-portal" })).toBeVisible();
     await expect(overview.getByRole("button", { name: "停用应用" })).toBeVisible();
+    // 底栏的「查看密钥」搬到概览动作行 —— 应用被筛掉时列表卡片入口不可达
+    await expect(overview.getByRole("button", { name: "查看密钥" })).toBeVisible();
 
     await dlg.getByRole("tab", { name: "品牌" }).click();
     await expect(dlg.getByLabel("展示名称")).toHaveValue("官网门户");
@@ -381,7 +409,7 @@ test.describe("接入应用（卡片 + 弹窗）", () => {
     });
   });
 
-  test("在线：开启维护需确认，走 PATCH .../maintenance", async ({ page }) => {
+  test("概览：开启维护需确认，走 PATCH .../maintenance", async ({ page }) => {
     await seedAdmin(page);
     const captured: Captured[] = [];
     await stub(page, captured);
@@ -392,8 +420,8 @@ test.describe("接入应用（卡片 + 弹窗）", () => {
       .getByRole("button", { name: "管理" })
       .click();
     const dlg = page.getByRole("dialog", { name: /应用管理/ });
-    await dlg.getByRole("tab", { name: "在线" }).click();
 
+    // 维护模式已在概览页签内（原「在线」页签已并入）：打开弹窗即可见，无需切页签。
     await dlg.getByRole("checkbox", { name: "开启维护模式" }).check();
     await dlg.getByRole("button", { name: "保存维护设置" }).click();
 
@@ -406,12 +434,81 @@ test.describe("接入应用（卡片 + 弹窗）", () => {
     expect(captured[0].body).toMatchObject({ enabled: true });
   });
 
+  /**
+   * 嵌套弹窗必须拿到**自己**的内边距。
+   *
+   * 回归来源（2026-11-20）：宿主弹窗的样式写成了后代选择器
+   * （`.dialog.app-manage-dialog .dl-body{padding:0}`），而编辑弹窗就渲染在宿主
+   * `.dl-body` 的**里面**（Dialog 不传 portal ⇒ 内联渲染）—— 于是子弹窗一起拿到
+   * padding:0 / overflow:hidden / 顶栏 padding 0，表现为标题贴顶被裁、表单贴边错位，
+   * 看上去像"表单组件坏了"。样式层已改直接子选择器，这条用例守的就是它。
+   *
+   * 判据只认几何：内边距、顶栏高度、弹窗宽度三者都必须回到 `.dialog` 的默认口径。
+   */
+  test("编辑应用信息：嵌套弹窗有自己的内边距，不被宿主弹窗串味", async ({ page }) => {
+    await seedAdmin(page);
+    await stub(page, []);
+    await page.goto("/admin/apps");
+    await page
+      .locator('[data-testid="app-card"]', { hasText: "web-portal" })
+      .getByRole("button", { name: "管理" })
+      .click();
+    const dlg = page.getByRole("dialog", { name: /应用管理/ });
+    await dlg.getByRole("button", { name: "编辑基本信息" }).click();
+    const edit = page.getByRole("dialog", { name: "编辑应用信息" });
+    await expect(edit).toBeVisible();
+    await expect(edit).toHaveCSS("opacity", "1");
+
+    const m = await edit.evaluate((el) => {
+      const body = el.querySelector(":scope > .dl-body") as HTMLElement;
+      const head = el.querySelector(":scope > .dl-head") as HTMLElement;
+      const grid = el.querySelector(".form-grid") as HTMLElement;
+      const bs = getComputedStyle(body);
+      return {
+        width: Math.round(el.getBoundingClientRect().width),
+        padTop: bs.paddingTop,
+        padLeft: bs.paddingLeft,
+        overflowY: bs.overflowY,
+        headPadTop: getComputedStyle(head).paddingTop,
+        headH: Math.round(head.getBoundingClientRect().height),
+        cols: getComputedStyle(grid).gridTemplateColumns.split(" ").length,
+      };
+    });
+    expect(m.width, "size=md 的宽度被宿主改掉了").toBe(440);
+    expect(m.padTop, "内边距被宿主的 padding:0 覆盖了").toBe("20px");
+    expect(m.padLeft).toBe("20px");
+    expect(m.overflowY, "子弹窗内容区必须自己滚").toBe("auto");
+    expect(m.headPadTop, "顶栏内边距被宿主的 0 覆盖了").toBe("16px");
+    expect(m.headH, "顶栏塌成一条标题线").toBeGreaterThan(40);
+    // 版式：标识 | 名称两列，说明与开关各占整行
+    expect(m.cols, "表单没走两列栅格").toBe(2);
+  });
+
+  test("管理弹窗：概览里的「在线」能力与统计同源，不再单独占一个页签", async ({ page }) => {
+    await seedAdmin(page);
+    await stub(page, []);
+    await page.goto("/admin/apps");
+    await page
+      .locator('[data-testid="app-card"]', { hasText: "web-portal" })
+      .getByRole("button", { name: "管理" })
+      .click();
+    const dlg = page.getByRole("dialog", { name: /应用管理/ });
+
+    // 「在线」页签已并入概览：既不能有同名页签，也要能在概览里读到运行态。
+    await expect(dlg.getByRole("tab", { name: "在线" })).toHaveCount(0);
+    const panel = dlg.getByRole("tabpanel", { name: "概览" });
+    await expect(panel.getByRole("heading", { name: /运行态/ })).toBeVisible();
+    // 维护开关与停用按钮必须同屏可达（原来分居两页，运营要来回切）
+    await expect(panel.getByRole("checkbox", { name: "开启维护模式" })).toBeVisible();
+    await expect(panel.getByRole("button", { name: "停用应用" })).toBeVisible();
+  });
+
   test("移动端 375px：卡片单列且无横向滚动", async ({ page }) => {
     await seedAdmin(page);
     await stub(page, []);
     await page.setViewportSize({ width: 375, height: 780 });
     await page.goto("/admin/apps");
-    await expect(page.getByRole("heading", { level: 1 })).toHaveText("接入应用");
+    await expect(page.getByRole("heading", { level: 1 })).toHaveText("应用管理");
     await expect(page.locator('[data-testid="app-card"]')).toHaveCount(2);
     await expectNoHScroll(page);
   });
@@ -499,11 +596,11 @@ test.describe("接入应用（卡片 + 弹窗）", () => {
     await expect(dlg.getByLabel("展示名称")).toHaveValue("临时改的名字");
   });
   /**
-   * 弹窗几何（桌面）：六个页签内容高差极大（概览带趋势图，公告只有一行），
+   * 弹窗几何（桌面）：五个页签内容高差极大（概览带趋势图，公告只有一行），
    * 而 .dialog 是 fixed + translate 的自高度居中盒 —— 外壳不定高时，
    * 切页签会上下各弹半格。jsdom 不做布局，这条只能由 Playwright 守。
    */
-  test("管理弹窗：切六个页签，外壳高度与上边缘恒定", async ({ page }) => {
+  test("管理弹窗：切五个页签，外壳高度与上边缘恒定", async ({ page }) => {
     await seedAdmin(page);
     await stub(page, []);
     await page.goto("/admin/apps");
@@ -515,8 +612,8 @@ test.describe("接入应用（卡片 + 弹窗）", () => {
     const dlg = page.getByRole("dialog", { name: /应用管理/ });
     await expect(dlg).toHaveCSS("opacity", "1"); // 桌面入场是 opacity 0→1 + scale(.95→1)
     const base = (await dlg.boundingBox())!;
-    for (const name of ["品牌", "公告", "版本", "在线", "插件", "概览"]) {
-      await dlg.getByRole("tab", { name }).click();
+    for (const name of ["品牌", "公告", "版本", "插件", "概览"]) {
+      await dlg.getByRole("tab", { name, exact: true }).click();
       const box = (await dlg.boundingBox())!;
       expect(Math.abs(box.height - base.height), `${name} 高度变了`).toBeLessThanOrEqual(1);
       expect(Math.abs(box.y - base.y), `${name} 上边缘变了`).toBeLessThanOrEqual(1);
@@ -539,18 +636,81 @@ test.describe("接入应用（卡片 + 弹窗）", () => {
     const dlg = page.getByRole("dialog", { name: /应用管理/ });
     await dlg.getByRole("tab", { name: "品牌" }).click();
     const panel = dlg.locator(".page-tabs > .tab-panel:not([hidden])");
-    // 先证明"有得滚"，否则下面是个空断言
-    expect(await panel.evaluate((el) => el.scrollHeight - el.clientHeight)).toBeGreaterThan(50);
+    // 先证明"有得滚"，否则下面是个空断言。
+    // 用 poll 而不是取一次值：两个 spec 并行跑时，面板可能还没完成首次布局
+    // （clientHeight=0 ⇒ 差值也是 0），一次取值会偶发红；poll 仍要求最终真的溢出。
+    await expect
+      .poll(async () => panel.evaluate((el) => el.scrollHeight - el.clientHeight))
+      .toBeGreaterThan(50);
 
-    const bar = (await dlg.locator(".page-tabs-bar").boundingBox())!;
+    // 页签条用角色定位：它已经搬进顶栏，类名 .page-tabs-bar 在本弹窗不复存在
+    const tablist = dlg.getByRole("tablist", { name: "应用管理" });
+    // 结构不变量优先于坐标：页签条不在任何滚动容器里，"跟着滚"在结构上就不可能。
+    // 只测坐标的话，把 overflow 挪回 .dl-body 而内容刚好不够高时仍会"通过"。
+    expect(await tablist.evaluate((el) => el.closest(".tab-panel") === null)).toBe(true);
+
+    const bar = (await tablist.boundingBox())!;
     // 用 evaluate 直接写 scrollTop：mouse.wheel 要命中坐标，容易被别的层吃掉
     await panel.evaluate((el) => {
       el.scrollTop = 260;
     });
     expect(await panel.evaluate((el) => el.scrollTop)).toBeGreaterThan(0);
 
-    const bar2 = (await dlg.locator(".page-tabs-bar").boundingBox())!;
+    const bar2 = (await tablist.boundingBox())!;
     expect(Math.abs(bar2.y - bar.y)).toBeLessThanOrEqual(1);
+  });
+
+  /**
+   * 滚动条必须贴着弹窗外壳的内沿。
+   *
+   * 结构根因：内边距曾挂在 `.dl-body`（padding:20px），而滚动发生在它内部的
+   * `.page-tabs > .tab-panel` —— 滚动条于是悬在右边 20px 处，上下还各短一截。
+   * 现在 padding 下沉到滚动容器自身，滚动条轨道右缘 = 外壳内沿（只差 1px 边框）。
+   *
+   * 两条断言缺一不可：先证明**确实有**竖向滚动条（否则内容不够高时永远"贴边"），
+   * 再量距离。
+   */
+  test("管理弹窗：滚动条贴外壳内沿（不是悬空 20px）", async ({ page }) => {
+    // 视口压矮：弹窗高度 = min(88vh, 780)，内容必须真的溢出，
+    // 否则"贴边"是内容不够长时的假象（断言第一条就会挡下来）。
+    await page.setViewportSize({ width: 1280, height: 700 });
+    await seedAdmin(page);
+    await stub(page, []);
+    await page.goto("/admin/apps");
+    await page
+      .locator('[data-testid="app-card"]', { hasText: "web-portal" })
+      .getByRole("button", { name: "管理" })
+      .click();
+
+    const dlg = page.getByRole("dialog", { name: /应用管理/ });
+    const panel = dlg.locator(".page-tabs > .tab-panel:not([hidden])");
+    // 用默认的「概览」（最长的一页：名片 + 四格 + 图 + 维护 + 应用状态）。
+    // 原用例切的是「品牌」，概览重排后品牌表单在 700px 下已经放得下，
+    // 前置条件（必须真的溢出）会直接判红 —— 那是页面变短，不是滚动条坏了。
+    // poll 而不是取一次值：切页签/首次布局未完成时 clientHeight 可能是 0。
+    await expect
+      .poll(async () => panel.evaluate((el) => el.scrollHeight - el.clientHeight))
+      .toBeGreaterThan(50);
+    const m = await panel.evaluate((el) => {
+      const d = el.closest(".dialog")!.getBoundingClientRect();
+      const p = el.getBoundingClientRect();
+      return {
+        gap: Math.round(d.right - p.right),
+        overflow: el.scrollHeight - el.clientHeight,
+        bar: el.offsetWidth - el.clientWidth,
+      };
+    });
+
+    // 前置条件：内容必须真的溢出，否则"贴边"毫无意义。
+    // 注意**不能**用 offsetWidth-clientWidth 判断有没有滚动条：无头 Chromium 用的是
+    // overlay 条（不占布局宽度），同一份代码在桌面 Chrome 上是 10px 占位条 ——
+    // 按宽度断言会在两种环境下给出相反结论。
+    expect(m.overflow, "内容没溢出，本断言失效").toBeGreaterThan(50);
+    expect(m.bar, "overlay 与占位条的实际宽度（仅记录，不作判据）").toBeGreaterThanOrEqual(0);
+
+    // 滚动容器右缘 = 外壳内沿（只差 .dialog 的 1px 边框）。
+    // padding 若留在 .dl-body，这里会是 ≈21（20 + 1）—— 就是本次要根治的"悬空"。
+    expect(m.gap, "滚动条没有贴到外壳内沿").toBeLessThanOrEqual(2);
   });
 
   /**
@@ -558,7 +718,7 @@ test.describe("接入应用（卡片 + 弹窗）", () => {
    * 这里守的是 CSS 特异性陷阱：.dialog.app-manage-dialog（0,2,0）会压过
    * @media 里 0,1,0 的 .dialog{width:100%}，漏写就会变成 345px 左贴边、右侧漏 30px。
    */
-  test("管理弹窗：375px 六个页签都可点、逐页签无横向溢出、高度恒定", async ({ page }) => {
+  test("管理弹窗：375px 五个页签都可点、逐页签无横向溢出、高度恒定", async ({ page }) => {
     await page.setViewportSize({ width: 375, height: 780 });
     await seedAdmin(page);
     await stub(page, []);
@@ -574,10 +734,22 @@ test.describe("接入应用（卡片 + 弹窗）", () => {
     const base = (await dlg.boundingBox())!;
     expect(base.width, "Sheet 没有满宽").toBe(375);
 
+    // 手机上顶栏单行：没有标题，页签不折行（无障碍名来自 aria-label）
+    await expect(dlg.locator(":scope > .dl-head > .dl-title")).toHaveCount(0);
+    const head = (await dlg.locator(":scope > .dl-head").boundingBox())!;
+    expect(head.height, "顶栏折成两行了").toBeLessThan(90);
+    // 五个页签在 375px 下刚好放得下（装了插件就会横滚）。
+    // 判据必须是「所有页签同一行」而不是「有溢出」：内容刚好放下时溢出量是 0，
+    // 拿溢出量当单行判据，会把「刚好放得下」误判成缺陷。
+    const tops = await dlg
+      .getByRole("tab")
+      .evaluateAll((els) => els.map((e) => Math.round(e.getBoundingClientRect().top)));
+    expect(new Set(tops).size, "顶栏页签折行了").toBe(1);
+
     // 页签清单必须包含第六个「插件」：漏了它，新增页签被裁也不会红。
-    for (const name of ["概览", "品牌", "公告", "版本", "在线", "插件"]) {
-      await dlg.getByRole("tab", { name }).click();
-      await expect(dlg.getByRole("tab", { name })).toBeInViewport(); // 第 5 项不被裁
+    for (const name of ["概览", "品牌", "公告", "版本", "插件"]) {
+      await dlg.getByRole("tab", { name, exact: true }).click();
+      await expect(dlg.getByRole("tab", { name, exact: true })).toBeInViewport(); // 第 5 项不被裁
       const panel = dlg.locator(".page-tabs > .tab-panel:not([hidden])");
       expect(await panel.evaluate((el) => el.scrollWidth - el.clientWidth)).toBeLessThanOrEqual(1);
       const box = (await dlg.boundingBox())!;

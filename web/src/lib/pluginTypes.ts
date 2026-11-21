@@ -86,6 +86,53 @@ export function fieldOf(e: PluginEntity, key: string): PluginField | undefined {
 }
 
 /**
+ * 把服务端描述归一成"这几项一定有"的形状。
+ *
+ * 为什么需要它（2026-11-18 真实事故）：前端是热更新、后端要重启，两者**不同步**
+ * 是常态。新增 `list.sort` / `list.filters` / `form` 之后，页面直接读
+ * `list.sort[0]` 与 `entity.form.sections`，对着一台还没重启的后端就是
+ * `Cannot read properties of undefined` —— 整个弹窗被错误边界接住、白屏。
+ *
+ * 归一规则（缺字段 = 能力更少，而不是崩）：
+ *  - `sort` / `filters` 缺失 → 空数组：表头不可排序、工具栏不出筛选器；
+ *  - `form` 缺失 → **单段单列、按字段声明顺序**，与后端"不声明 form"时的投影逐字一致；
+ *  - `columns` / `actions` 缺失（更老的版本）→ 空数组：表格退化成"什么都没有"，
+ *    但仍能读到顶部的错/空态，而不是白屏。
+ *
+ * 类型上的"必填"是**归一之后**的契约：调用方只经过这里拿描述，就不会碰到半截数据。
+ */
+export function normalizeEntity(raw: PluginEntity): PluginEntity {
+  const e = raw as Partial<PluginEntity> & Pick<PluginEntity, "fields">;
+  const fields = e.fields ?? [];
+  const list = e.list ?? ({} as PluginEntity["list"]);
+  const sections = e.form?.sections;
+  return {
+    ...(raw as PluginEntity),
+    fields,
+    list: {
+      columns: list.columns ?? [],
+      actions: list.actions ?? [],
+      sort: list.sort ?? [],
+      filters: list.filters ?? [],
+    },
+    form:
+      sections && sections.length > 0
+        ? { sections }
+        : {
+            sections:
+              fields.length > 0
+                ? [{ title: "", columns: 1 as const, fields: fields.map((f) => f.key) }]
+                : [],
+          },
+  };
+}
+
+/** 批量归一（插件详情里的 entities） */
+export function normalizeEntities(raw: PluginEntity[] | undefined): PluginEntity[] {
+  return (raw ?? []).map(normalizeEntity);
+}
+
+/**
  * 服务端 problems 的 path 形如 `data.ticketNo` / `config.slaHours`，
  * 这里剥掉前缀拿到字段 key；不是字段级问题返回空串（走顶部汇总）。
  */

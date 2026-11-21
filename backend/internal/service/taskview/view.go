@@ -98,8 +98,13 @@ type PortalItem struct {
 // 这些字段**永远不下发门户**：渠道号、上游代号、上游单号能反推我们的供应链。
 type AdminView struct {
 	PortalItem
-	UserID    uint64 `json:"user_id"`
-	KeyID     uint64 `json:"key_id"`
+	UserID uint64 `json:"user_id"`
+	KeyID  uint64 `json:"key_id"`
+	// AppID / AppName 是任务归属的应用（经 key_id → api_keys.app_id 派生）。
+	// 只在管理台出现：门户用 PortalItem，结构里根本没有这两个字段。
+	// 由 task.FillApp 批量补齐（AdminOf 不查库，与图标同一条分工）。
+	AppID     uint64 `json:"app_id"`
+	AppName   string `json:"app_name,omitempty"`
 	ChannelID uint64 `json:"channel_id"`
 	// Platform 是适配器标识（duomi / metaso / spec:xxx），仅管理台可见。
 	Platform string `json:"platform"`

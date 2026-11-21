@@ -3,6 +3,7 @@ import { apiClient, ApiError, DEFAULT_PAGE_SIZE, downloadCSV, upload, type PageQ
 import { apiUrl } from "@/lib/apiBase";
 import { setBillingConstants } from "@/lib/format";
 import { invalidatePortalMode } from "@/lib/portalMode";
+import { clearAccountQueries } from "@/lib/queryClient";
 import { isActiveTask } from "@/lib/task";
 import { useAuthStore } from "@/stores/auth";
 import type {
@@ -10,6 +11,7 @@ import type {
   AdapterSpecImpact,
   AdapterSpecItem,
   AdapterSpecPayload,
+  AdminAppOption,
   AdminAuditItem,
   AdminConfigResult,
   AdminChannelsResult,
@@ -125,6 +127,9 @@ export const queryKeys = {
   adminUserKeys: (id: number) => ["admin", "users", id, "keys"] as const,
   adminUsersAll: ["admin", "users"] as const,
   adminApps: (params: AdminAppsParams) => ["admin", "apps", "list", params] as const,
+  // 选项与卡片列表分开缓存：形状不同（选项不含聚合），混用会让下拉触发一次全量聚合。
+  adminAppOptions: (params: AdminAppOptionsParams) =>
+    ["admin", "apps", "options", params] as const,
   /**
    * 列表前缀（不含任何详情）。
    *
@@ -325,6 +330,9 @@ export function useLoginMutation() {
       // 需要二次验证：**没有 Cookie、没有用户**，用户态必须保持未登录，
       // 否则前端会先跳进 /home，再被守卫弹回来（闪一下才算失败）。
       if ("mfa_required" in outcome.data) return;
+      // 换号登录：先清掉上一个账号的账户级缓存，再写用户态。
+      // 反过来的话，中间那一瞬（以及随后 30s staleTime 内）页面读到的仍是旧账号数据。
+      clearAccountQueries();
       // 服务端已把会话票写进 httpOnly Cookie；这里只接管用户态。
       setUser(outcome.data.user);
       void queryClient.invalidateQueries({ queryKey: queryKeys.me });
@@ -346,6 +354,8 @@ export function useLoginMFAMutation() {
     },
     onSuccess: (outcome) => {
       if (!outcome.ok) return;
+      // 同 useLoginMutation：MFA 是同一轮登录的第二步，换号时也要先清旧缓存。
+      clearAccountQueries();
       setUser(outcome.data.user);
       void queryClient.invalidateQueries({ queryKey: queryKeys.me });
     },
@@ -590,6 +600,10 @@ export interface AdminUsersParams {
   keyword?: string;
   group?: string;
   status?: number;
+  /** 按所属应用筛选：0 = 平台直连（订单/日志/任务）；用户页不接受 0 */
+  app_id?: number;
+  // 用户页的 app_id 语义不同：筛的是「在该应用下持有托管密钥」的用户，
+  // 且 app_id=0 会被后端拒绝（用户池全局共享，没有「平台直连的用户」）。
 }
 
 export function useAdminUsersQuery(params: AdminUsersParams) {
@@ -1327,6 +1341,8 @@ export interface PortalTasksParams {
 
 export interface AdminTasksParams extends PortalTasksParams {
   user_id?: number;
+  /** 按所属应用筛选：0 = 平台直连（订单/日志/任务）；用户页不接受 0 */
+  app_id?: number;
 }
 
 /** 门户异步任务（服务端分页，S7）；筛选参数变化即重新取数。 */
@@ -1480,6 +1496,8 @@ export interface PortalOrdersParams {
 
 export interface AdminOrdersParams extends PortalOrdersParams {
   user_id?: number;
+  /** 按所属应用筛选：0 = 平台直连（订单/日志/任务）；用户页不接受 0 */
+  app_id?: number;
   /** 稳定渠道 ID（推荐） */
   pay_channel_id?: string;
   /** 渠道展示快照（历史兼容，精确匹配） */
@@ -1866,6 +1884,8 @@ export function usePortalDefaultsQuery() {
 export interface AdminLogsParams extends PageQuery {
   scope?: "hot" | "archive";
   user_id?: number;
+  /** 按所属应用筛选：0 = 平台直连（订单/日志/任务）；用户页不接受 0 */
+  app_id?: number;
   model?: string;
   channel_id?: number;
   modality?: string;
@@ -2346,7 +2366,7 @@ export function useAffiliateBackfillMutation() {
 }
 
 /* ============================================================
-   接入应用（管理台）
+   应用管理（管理台）
    ============================================================ */
 
 export interface AdminAppsParams extends PageQuery {
@@ -2372,6 +2392,39 @@ export function useAdminAppsQuery(params: AdminAppsParams) {
     queryFn: () => apiClient.getPage<AdminAppItem>("/admin/apps", { ...params }),
     placeholderData: (previous) => previous,
   });
+}
+
+/** 应用下拉选项的参数：只在结果被截断时才带 keyword 回查。 */
+export interface AdminAppOptionsParams {
+  keyword?: string;
+}
+
+/**
+ * 应用下拉选项（轻量：只回 id/slug/name/display_name/status）。
+ *
+ * 三个刻意的选择：
+ *  1. `staleTime 5 分钟`：应用增删是低频动作，而管理台四个页面都要用它，
+ *     不设就会每次进页面重拉一遍；
+ *  2. `meta.silent`：这是"全站共享但可缺失"的基础数据，拉不到不该在每个页面
+ *     弹一次错误提示（全局 QueryCache 会对所有查询 toast）；
+ *  3. 返回值**归一成 items: []**：接口挂掉时页面直接 map 不会炸，
+ *     筛选器退化成"只有全部应用"，而不是整页白屏。
+ */
+export function useAdminAppOptionsQuery(params: AdminAppOptionsParams = {}) {
+  const query = useQuery({
+    queryKey: queryKeys.adminAppOptions(params),
+    queryFn: () =>
+      apiClient.get<{ items: AdminAppOption[]; truncated: boolean }>("/admin/apps/options", {
+        query: { ...params },
+      }),
+    staleTime: 5 * 60_000,
+    meta: { silent: true },
+  });
+  return {
+    ...query,
+    items: query.data?.items ?? [],
+    truncated: query.data?.truncated ?? false,
+  };
 }
 
 /** 新建应用。此时不存在任何详情缓存，全量失效一次最省事。 */
@@ -2941,13 +2994,59 @@ export function useDeleteAppPluginRecordMutation() {
   });
 }
 
-/** 导出当前筛选的记录 CSV。 */
+/**
+ * 批量删除（单事务）。
+ *
+ * 上限 100 条由后端把关：前端不复制这个数字，只在超限时把后端消息原样弹出来 ——
+ * 两处各写一个上限，改一处就会漂。
+ */
+export function useBatchDeleteAppPluginRecordsMutation() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({
+      id,
+      key,
+      entity,
+      recordKeys,
+    }: {
+      id: number;
+      key: string;
+      entity: string;
+      recordKeys: string[];
+    }) =>
+      apiClient.post<{ deleted: number }>(`/admin/apps/${id}/plugins/${key}/records/batch-delete`, {
+        entity,
+        record_keys: recordKeys,
+      }),
+    onSuccess: (_d, { id, key }) => {
+      void qc.invalidateQueries({ queryKey: queryKeys.adminAppPluginRecordsAll(id, key) });
+      void qc.invalidateQueries({ queryKey: queryKeys.adminAppPluginDetail(id, key) });
+    },
+  });
+}
+
+/**
+ * 导出当前筛选的记录 CSV。
+ *
+ * 排序不跟着屏幕走（后端恒按创建顺序）：keyset 依赖单调列，
+ * 按数据列排序只能整表排或内存排，5 万行的上限就是为此设的。
+ */
 export function exportAppPluginRecords(
   id: number,
   key: string,
-  params: { entity: string; keyword?: string },
+  params: PageQuery & { entity: string },
 ): Promise<void> {
   return downloadCSV(`/admin/apps/${id}/plugins/${key}/records/export`, { ...params }, `${key}-${params.entity}.csv`);
+}
+
+/**
+ * 下载「应用插件开发手册」（markdown，由后端从代码生成）。
+ *
+ * 复用 downloadCSV：它名字里有 CSV，但做的是"凭会话取回 Blob 并按
+ * Content-Disposition 存盘"，与文件类型无关（重命名会牵动 8 个调用点）。
+ */
+export function downloadPluginDevDoc(): Promise<void> {
+  return downloadCSV("/admin/app-plugins/dev-doc.md", undefined, "应用插件开发手册.md");
 }
 
 /* ---------------- 版本与一键更新 ---------------- */

@@ -227,7 +227,9 @@ func (OpenAI) Forward(ctx context.Context, cfg *relay.ChannelConfig, r *relay.Re
 		}, nil
 	}
 	defer resp.Body.Close()
-	buf, err := readUpstreamBody(resp.Body, maxUpstreamBodyBytes)
+	// 上限按端点族取：出图接口默认回 b64_json，4/3 放大后很容易越过 8 MiB，
+	// 按 chat 的上限读会把正常出图判成"上游体过大"（用户看到 502）。
+	buf, err := readUpstreamBody(resp.Body, relay.BodyCapFor(path))
 	if err != nil {
 		return nil, fmt.Errorf("读取上游响应失败：%w", err)
 	}
@@ -735,19 +737,12 @@ func client(cfg *relay.ChannelConfig) *http.Client {
 // errUpstreamBodyTooLarge 指向 relay 包级哨兵：网关侧要用 errors.Is 判归因（不能靠字符串）。
 var errUpstreamBodyTooLarge = relay.ErrUpstreamBodyTooLarge
 
-// readUpstreamBody 读取上游响应体，最多 limit 字节；超出即报错而不是静默截断。
+// readUpstreamBody 是 relay.ReadUpstreamBody 的薄包装（保留同包调用点）。
 //
-// 为什么读 limit+1 而不是直接 LimitReader(limit)：LimitReader 会把超限响应**截断**
-// 后当成正常体重返（JSON 解析失败 → 报「解析失败」），错误归因完全走偏。
+// 实现只在 relay 维护：超限要报错而不是静默截断（LoadReader 截断后 JSON 解析失败，
+// 错误会被归因成「上游返回了坏数据」）。本包其它适配器一律调这里，不要另写。
 func readUpstreamBody(r io.Reader, limit int64) ([]byte, error) {
-	buf, err := io.ReadAll(io.LimitReader(r, limit+1))
-	if err != nil {
-		return nil, err
-	}
-	if int64(len(buf)) > limit {
-		return nil, fmt.Errorf("%w（上限 %d 字节）", errUpstreamBodyTooLarge, limit)
-	}
-	return buf, nil
+	return relay.ReadUpstreamBody(r, limit)
 }
 
 // cappedBody 是「流式 + 硬上限」的响应体包装：读满 limit 字节后再读即返回超限错误。

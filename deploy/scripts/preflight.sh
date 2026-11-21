@@ -57,10 +57,17 @@ esac
 
 key="$(read_env APP_ENCRYPTION_KEY '')"
 if [ -n "$key" ]; then
-  if [ "${#key}" -lt 32 ]; then
-    fail "APP_ENCRYPTION_KEY 只有 ${#key} 位，至少 32 位（openssl rand -hex 32）"
-  elif [ "$key" = "0951329789abcdef0951329789abcdef" ]; then
+  # 公开示例值必须与本表同步：backend/internal/conf/secrets.go 的 publicSecretValues。
+  # 历史事故：这里比对的是另一个字面量，于是"用公开示例值部署"体检显示 pass，
+  # 而后端 ValidateSecrets 在 prod 直接拒绝启动 —— 体检绿灯、服务起不来。
+  if [ "$key" = "0123456789abcdef0123456789abcdef" ]; then
     fail "APP_ENCRYPTION_KEY 是公开示例值 —— 等于把库内密文交给任何读过源码的人"
+  elif [ "${#key}" -lt 16 ]; then
+    # 硬下限 16 与后端一致（服务端 SHA-256 派生，任意长度可用，门槛只防"没有熵"）。
+    # 卡到 32 会让现网 24 字符密钥的部署升级即起不来。
+    fail "APP_ENCRYPTION_KEY 只有 ${#key} 位，至少 16 位（建议 openssl rand -hex 32）"
+  elif [ "${#key}" -lt 32 ]; then
+    warn "APP_ENCRYPTION_KEY 为 ${#key} 位：能正常派生，但建议至少 32 位（openssl rand -hex 32 生成 64 位）"
   else
     pass "APP_ENCRYPTION_KEY 长度 ${#key}"
   fi

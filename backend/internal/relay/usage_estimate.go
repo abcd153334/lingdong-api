@@ -21,6 +21,28 @@ const MaxUpstreamBodyBytes = 8 << 20
 // 单一来源：适配器的 TTS 流、规格的同步/桥接下载都引用它。
 const MaxBinaryBodyBytes = 32 << 20
 
+// MaxImageBodyBytes 是图片端点**同步 JSON** 响应体的上限。
+//
+// 与 chat 的 8 MiB 分开：出图接口默认回 b64_json，且 base64 有 4/3 放大 ——
+// 一张 1792×1024 的 PNG 编码后就可能越过 8 MiB，4K 组图可达数十 MiB。
+// 按 8 MiB 读会被判成"上游体过大"，用户看到 502，实际只是图大了。
+//
+// 取值与 Ark 适配器既有的 arkMaxUpstreamBody 一致（64 MiB），不制造第二套口径。
+const MaxImageBodyBytes = 64 << 20
+
+// BodyCapFor 按端点标识（path 或 spec 的端点 key，如 "images/generations"）
+// 返回该端点应有的响应体上限。
+//
+// 唯一判据：端点族带 "images/"，其余一律按 JSON 的 8 MiB。
+// 注意**不要改 MaxUpstreamBodyBytes 本身** —— spec/bridge_test.go 明确锁住
+// 「chat/completions 端点超 8 MiB 必须报 ErrUpstreamBodyTooLarge」。
+func BodyCapFor(endpoint string) int64 {
+	if strings.Contains(endpoint, "images/") {
+		return MaxImageBodyBytes
+	}
+	return MaxUpstreamBodyBytes
+}
+
 // promptCompletionEst 是预扣时使用的估算 token（Prompt 为请求侧估算，Completion 为 max_tokens 最坏值）。
 type promptCompletionEst struct {
 	Prompt     int64

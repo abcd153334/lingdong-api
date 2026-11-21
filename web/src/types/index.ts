@@ -1395,6 +1395,10 @@ export interface TaskItem extends TaskView {
 export interface AdminTaskItem extends TaskItem {
   user_id: number;
   key_id: number;
+  /** 任务归属的应用（经 key_id 派生）；0 = 平台直连（用户自建密钥） */
+  app_id: number;
+  /** 应用展示名（display_name 优先）；0 或查不到时为空串 */
+  app_name?: string;
   channel_id: number;
   /** 服务商标识（如 duomi / metaso），仅管理台可见 */
   platform: string;
@@ -1583,6 +1587,10 @@ export interface OrderItem {
 export interface AdminOrderItem extends OrderItem {
   user_id: number;
   username?: string;
+  /** 订单归属的应用；0 = 平台直连（门户/开放 API 用户自充） */
+  app_id: number;
+  /** 应用展示名（display_name 优先）；0 或查不到时为空串 */
+  app_name?: string;
   /** 下单时的渠道展示快照（可能已改名，仅用于展示） */
   pay_channel: string;
   /** 稳定渠道 ID（筛选与对账用） */
@@ -2377,6 +2385,10 @@ export interface AdminLogItem {
   username: string;
   key_id: number;
   key_name: string;
+  /** 这条调用归属的应用（经 key_id 派生）；0 = 平台直连 */
+  app_id: number;
+  /** 应用展示名（display_name 优先）；0 或查不到时为空串 */
+  app_name?: string;
   model: string;
   /** 模型图标地址（已回落供应商） */
   model_icon_url?: string;
@@ -2587,10 +2599,27 @@ export interface PackageWriteResult {
 }
 
 /* ============================================================
-   接入应用（对外 API 的归属主体）
+   应用管理（对外 API 的归属主体）
    ============================================================ */
 
 /** 管理台应用列表的一行（含聚合口径与卡片展示字段） */
+/**
+ * GET /api/admin/apps/options 的下拉项（**不含**卡片那套聚合）。
+ *
+ * 与 `AdminAppItem` 分开是刻意的：卡片视图每行要打四五条聚合查询，
+ * 而筛选下拉只需要 id 与名字。两个形状共用一个类型会让"加个字段"变成
+ * 一次全量聚合的代价。
+ */
+export interface AdminAppOption {
+  id: number;
+  slug: string;
+  name: string;
+  /** 对外品牌名（可能为空串）：渲染按 `display_name || name` */
+  display_name: string;
+  /** 1 启用 / 2 停用（停用也要能筛：历史订单/日志指向它） */
+  status: number;
+}
+
 export interface AdminAppItem {
   id: number;
   slug: string;
@@ -2789,6 +2818,23 @@ export interface PluginField {
   maxLen: number;
   options?: string[];
   default?: unknown;
+  /** 字段下方的常驻说明（填什么）；与 error 同一位置，错误优先 */
+  help?: string;
+  /** 输入框占位提示 */
+  placeholder?: string;
+  /** 表单里禁改（**不是安全边界**，服务端判据仍只有 manifest 与安装状态） */
+  readOnly?: boolean;
+  /** 仅 int：允许范围 */
+  min?: number;
+  max?: number;
+}
+
+/** 表单分段（投影后每个字段恰好出现一次，未声明的字段已被追加到末段） */
+export interface PluginFormSection {
+  /** 空串 = 不渲染段头（未声明 form 的实体就是这种） */
+  title: string;
+  columns: 1 | 2;
+  fields: string[];
 }
 
 /** 列表列（已解析成 label/type，前端不再回查字段表） */
@@ -2796,6 +2842,27 @@ export interface PluginColumn {
   key: string;
   label: string;
   type: string;
+}
+
+/** 可排序白名单的一项（`order` 是该字段被选中时的默认方向） */
+export interface PluginSort {
+  key: string;
+  label: string;
+  type: string;
+  order: "asc" | "desc";
+}
+
+/**
+ * 可筛选白名单的一项。
+ *
+ * `op` 是**行为声明**：前端按它选控件（eq→下拉/开关三态、range→两个输入框、
+ * contains→搜索框），服务端按它拼 WHERE。不要在类型上再推一遍算子逻辑。
+ */
+export interface PluginFilter {
+  key: string;
+  label: string;
+  type: string;
+  op: "eq" | "range" | "contains";
 }
 
 export interface PluginEntity {
@@ -2806,9 +2873,15 @@ export interface PluginEntity {
   fields: PluginField[];
   list: {
     columns: PluginColumn[];
-    /** create / update / delete / export */
+    /** create / update / delete / export / batch_delete */
     actions: string[];
+    /** 可排序白名单（首项是默认排序）；空数组 = 只能按创建顺序 */
+    sort: PluginSort[];
+    /** 可筛选白名单 */
+    filters: PluginFilter[];
   };
+  /** 表单布局：恒至少一段，前端直接遍历 */
+  form: { sections: PluginFormSection[] };
   /** 可直接对外读取的字段 key；空数组 = 这个对象不对外 */
   public: string[];
 }
@@ -2864,6 +2937,8 @@ export interface AdminAppPluginDetail {
   };
   /** 目录已升级、本应用仍按旧版写入过：页面顶部出横幅 */
   drift: { installed: string; current: string } | null;
+  /** 当前 manifest 声明为必填、但这条安装里没有值的配置键（升级新增必填项后会出现） */
+  config_missing: string[];
   record_count: number;
   catalog_disabled: boolean;
 }

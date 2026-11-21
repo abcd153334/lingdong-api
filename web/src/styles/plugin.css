@@ -167,3 +167,111 @@
   font-size: 12px;
   color: var(--t2);
 }
+
+/* ---------- 筛选条（按 manifest 的 list.filters 渲染） ----------
+   一列一个控件：标签在控件上方，range 用两个输入框。
+   不加横向滚动 —— 手机上横向滚动等于"永远看不全筛选条件"。 */
+.plugin-filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px 14px;
+  margin-bottom: 12px;
+}
+.plugin-filter {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  /* 宽度归容器：控件保持 100%（X14），这里只给每列一个下界 */
+  min-width: 0;
+  flex: 0 1 220px;
+}
+.plugin-filter__label {
+  font-size: 12px;
+  color: var(--t3);
+}
+/* 两个输入框并排：日期/数字各占一半，`至` 不换行 */
+.plugin-filter__range {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+.plugin-filter__range > * {
+  min-width: 0;
+}
+
+/* 每页条数：宽度给容器，不写控件 */
+.plugin-pagesize {
+  width: 88px;
+  flex: none;
+}
+/* 「删除所选」是危险动作，用语义色而不是新色板 */
+.plugin-batch {
+  color: var(--danger);
+}
+
+/* 只读详情顶部的一行元信息（编号/版本/时间） */
+.plugin-view__meta {
+  margin: 0 0 12px;
+}
+
+@media (max-width: 767px) {
+  /* 手机上筛选器一列一行：两个并排的日期框在 375px 下只剩 70px，选不出日期 */
+  .plugin-filters {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  .plugin-filter {
+    flex: 1 1 auto;
+  }
+  .plugin-pagesize {
+    width: 100%;
+  }
+}
+
+/* ---------- 分组表单（按 manifest 的 entity.form 渲染） ----------
+   列宽归容器（X14）：控件本身仍是 100%，这里只定轨道。
+   `.plugin-form` 已是单列网格，分段再套一层网格 —— 两层都写 grid-template-columns
+   不会互相打架，因为分段之间是独立的行。 */
+.plugin-form__sec {
+  display: block;
+}
+.plugin-form__sec + .plugin-form__sec {
+  margin-top: 4px;
+}
+.plugin-form__sec-title {
+  margin: 0 0 8px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--t2);
+}
+.plugin-form__grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 12px;
+  min-width: 0;
+}
+.plugin-form__grid--2 {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+/* 说明/错误：与 Field 的 hint 同一位置、同一字号；开关行没有 Field 包裹，单独兜住。 */
+.plugin-form__help {
+  margin: 4px 0 0;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--t3);
+}
+.plugin-form__help--warn {
+  color: var(--danger);
+}
+/* 开关行在两列里横跨整行：半宽开关右侧留白会被当成"还有一列没加载出来" */
+.plugin-form__grid--2 > .plugin-form__bool {
+  grid-column: 1 / -1;
+}
+
+@media (max-width: 767px) {
+  /* 手机上两列每列只剩 ~140px，日期/URL 完全看不清 */
+  .plugin-form__grid--2 {
+    grid-template-columns: 1fr;
+  }
+}

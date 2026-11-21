@@ -14,8 +14,11 @@ import (
 // 为什么要有这条：示例是给 AI 的 few-shot，文档是给人看的；两份不同步时，
 // AI 会照着文档写出示例里没有的字段（或被示例里的旧字段误导），
 // 而错误要到"导入被拒"那一步才暴露。
+//
+// 文档名写死（不用 devdoc.FileName）：devdoc 反过来 import 本包，
+// 这里引用它就成环了。改文件名要同时改本行与 devdoc。
 func TestSampleMatchesDoc(t *testing.T) {
-	path := filepath.Join("..", "..", "..", "..", "docs", "应用插件-manifest-v1.md")
+	path := filepath.Join("..", "..", "..", "..", "docs", "应用插件开发手册.md")
 	raw, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatalf("读不到插件文档（路径 %s）: %v", path, err)

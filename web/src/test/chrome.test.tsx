@@ -87,31 +87,31 @@ describe("管理台 chrome", () => {
   it("侧栏按分区渲染全部导航项，当前项高亮，顶栏面包屑同步", async () => {
     renderAt("/admin/users");
     await screen.findByRole("heading", { level: 1 });
-    // 15 项 = 3 顶级项（仪表盘/系统配置/模型服务）+ 4 组（2+4+4+2）；
+    // 15 项 = 5 顶级项（仪表盘/系统配置/模型服务/用户管理/应用管理）+ 3 组（4+4+2）；
     // 账户设置在头像菜单里、AI 接入助手收敛进模型服务弹窗，都不占侧栏。
     expect(document.querySelectorAll(".a-side nav a")).toHaveLength(15);
     expect(document.querySelector(".a-side nav a.active")?.textContent).toContain("用户管理");
     expect(document.querySelector(".a-top .crumb b")?.textContent).toBe("用户管理");
-    // 组头只有 4 个（顶级项不画标题）；7 个分区各占一个 .nav-sec
-    expect(document.querySelectorAll(".a-side .nav-group")).toHaveLength(4);
-    expect(document.querySelectorAll(".a-side nav .nav-sec")).toHaveLength(7);
+    // 组头只有 3 个（顶级项不画标题）；8 个分区各占一个 .nav-sec
+    expect(document.querySelectorAll(".a-side .nav-group")).toHaveLength(3);
+    expect(document.querySelectorAll(".a-side nav .nav-sec")).toHaveLength(8);
     // 每个组头 = 语义图标 + 折叠箭头（2 个 svg）；每条菜单项恒 1 个 —— 「开关 vs 目的」
     // 的可见区别就在这里，也是「没有 caret 的行不得被当成组头」的判据。
     expect(
       [...document.querySelectorAll(".a-side .nav-group")].map(
         (h) => h.querySelectorAll("svg").length,
       ),
-    ).toEqual([2, 2, 2, 2]);
+    ).toEqual([2, 2, 2]);
     expect(
       [...document.querySelectorAll(".a-side nav a")].map((a) => a.querySelectorAll("svg").length),
     ).toEqual(Array(15).fill(1));
-    // 层级：缩进容器只挂在**有组标题**的分区上（4 个）。
-    // 顶级项（仪表盘 / 系统配置 / 模型服务）是同级入口，若被塞进 .nav-sub
-    // 就会被缩进成某组的子项 —— 这正是"顶级项"与"分组"必须靠结构区分的原因。
-    expect(document.querySelectorAll(".a-side .nav-sub")).toHaveLength(4);
+    // 层级：缩进容器只挂在**有组标题**的分区上（3 个）。
+    // 顶级项（仪表盘 / 系统配置 / 模型服务 / 用户管理 / 应用管理）是同级入口，
+    // 若被塞进 .nav-sub 就会被缩进成某组的子项 —— 这正是"顶级项"与"分组"必须靠结构区分的原因。
+    expect(document.querySelectorAll(".a-side .nav-sub")).toHaveLength(3);
     expect(document.querySelector(".a-side nav .nav-sec")?.querySelector(".nav-sub")).toBeNull();
     // 行骨架与角色类由组件显式给出，不再依赖「在 nav 里」这个偶然属性
-    expect(document.querySelectorAll(".a-side .nav-row")).toHaveLength(19); // 4 组头 + 15 项
+    expect(document.querySelectorAll(".a-side .nav-row")).toHaveLength(18); // 3 组头 + 15 项
     expect(document.querySelectorAll(".a-side .nav-item")).toHaveLength(15);
     // 读屏拿不到 class："你在这里"必须走 aria-current
     expect(document.querySelector('.a-side nav a[aria-current="page"]')?.textContent).toContain(
@@ -122,8 +122,9 @@ describe("管理台 chrome", () => {
   it("分组可折叠：只加类不删节点", async () => {
     renderAt("/admin/dashboard");
     await screen.findByRole("heading", { level: 1 });
-    const head = screen.getByRole("button", { name: "用户与应用" });
-    const box = document.getElementById("nav-sec-accounts");
+    // 折叠样本换成「交易与资金」：原样本「用户与应用」已拆成两个顶级项（不可折叠）
+    const head = screen.getByRole("button", { name: "交易与资金" });
+    const box = document.getElementById("nav-sec-billing");
     expect(head).toHaveAttribute("aria-expanded", "true");
     expect(box).not.toHaveClass("is-collapsed");
 
@@ -131,7 +132,7 @@ describe("管理台 chrome", () => {
     expect(head).toHaveAttribute("aria-expanded", "false");
     expect(box).toHaveClass("is-collapsed");
     // 关键：链接仍在 DOM（可见性由 CSS 负责，jsdom 不加载样式表，断言可见性会假通过）
-    expect(box?.querySelectorAll("a")).toHaveLength(2);
+    expect(box?.querySelectorAll("a")).toHaveLength(4);
     expect(document.querySelectorAll(".a-side nav a")).toHaveLength(15);
 
     fireEvent.click(head);

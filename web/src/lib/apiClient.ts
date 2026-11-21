@@ -265,11 +265,25 @@ async function parseResponse<T>(res: Response, path: string): Promise<T> {
   return payload.data;
 }
 
-/** 从 Content-Disposition 解析文件名（缺失返回 null） */
-function filenameFrom(disposition: string | null): string | null {
+/**
+ * 从 Content-Disposition 解析文件名（缺失返回 null）。
+ *
+ * RFC 6266：同时出现 `filename=` 与 `filename*=` 时，**`filename*` 优先** ——
+ * 前者只能是 ASCII（服务端一般填英文兜底名），后者带 `UTF-8''` 声明、能表达中文。
+ * 曾经只用一个正则取第一个命中，于是"中文文件名"永远被那个英文兜底名顶掉。
+ */
+export function filenameFrom(disposition: string | null): string | null {
   if (!disposition) return null;
-  const hit = /filename\*?=(?:UTF-8'')?"?([^";]+)"?/i.exec(disposition);
-  return hit ? decodeURIComponent(hit[1]) : null;
+  const ext = /filename\*\s*=\s*utf-8''([^;]+)/i.exec(disposition);
+  if (ext) {
+    try {
+      return decodeURIComponent(ext[1].trim().replace(/^"|"$/g, ""));
+    } catch {
+      // 编码坏了就退回 ASCII 名，不要因为文件名让整个下载失败
+    }
+  }
+  const plain = /filename\s*=\s*"?([^";]+)"?/i.exec(disposition);
+  return plain ? plain[1].trim() : null;
 }
 
 /**

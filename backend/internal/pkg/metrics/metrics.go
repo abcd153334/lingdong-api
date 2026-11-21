@@ -172,6 +172,14 @@ const (
 	NameStorageOrphans       = "storage_orphans"
 	NameStorageGCTotal       = "storage_gc_total"
 	NameWorkerJobPanic       = "worker_job_panic_total"
+
+	// ── 计费对账（资金差异必须能被告警规则抓到） ──
+	//
+	// 以前对账差异只写日志：没有指标就没有告警规则，资金异常只能靠人翻日志发现，
+	// 而"昨天有差异、今天没了"与"昨天到今天都没跑"在日志里长得一模一样。
+	NameBillingReconcileFundDiff = "billing_reconcile_fund_diff"
+	NameBillingReconcileWatchDiff = "billing_reconcile_watch_diff"
+	NameBillingReconcileTimestamp = "billing_reconcile_last_success_timestamp_seconds"
 )
 
 // defs 是指标元数据表（name → Def）。
@@ -235,6 +243,12 @@ var defs = map[string]Def{
 		"孤儿对账逐条结局（按 bucket 与 result）"},
 	NameWorkerJobPanic: {TypeCounter,
 		"Worker Job panic 次数（已隔离，进程继续）"},
+	NameBillingReconcileFundDiff: {TypeGauge,
+		"计费对账发现的资金差异条数（>0 必须人工介入：多扣/少扣/重复入账）"},
+	NameBillingReconcileWatchDiff: {TypeGauge,
+		"计费对账的观察档条数（中间态：冻结漂移、终态后仍 pending 等，不直接是资损）"},
+	NameBillingReconcileTimestamp: {TypeGauge,
+		"计费对账最近一次完成的时间戳（秒）；长时间不涨说明任务没跑，而不是「差异为 0」"},
 }
 
 // defaultBuckets 是耗时直方图的桶边界（秒）：覆盖 5ms 到 60s，够网关与上游调用用。

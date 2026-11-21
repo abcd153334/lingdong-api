@@ -1,5 +1,4 @@
 import { useMemo, useState } from "react";
-import { useNavigate } from "@tanstack/react-router";
 
 import { confirmDialog } from "@/components/common/ConfirmDialog";
 import { Dialog } from "@/components/common/Dialog";
@@ -11,6 +10,7 @@ import { toastOk } from "@/components/common/Toaster";
 import { SchemaFields } from "@/components/plugins/SchemaFields";
 import { toastApiError } from "@/lib/apiToast";
 import {
+  downloadPluginDevDoc,
   useAdminAppPluginInstallsQuery,
   useAdminAppPluginQuery,
   useAdminAppPluginsQuery,
@@ -36,17 +36,7 @@ import type { AdminAppItem, AdminAppPluginInstall, AdminAppPluginItem, PluginFie
  *  - 所有写操作都立即生效，没有"保存"按钮：密钥池、公告早就是这个口径，
  *    弹窗底部也没有统一保存条，多一个"先改后存"会让人以为取消能回滚。
  */
-export function PluginsTab({ app, onOpenPlugin }: {
-  app: AdminAppItem;
-  /** 宿主自己接管「打开」时的行为（例如切页签）；不给则回退到跳插件独立页。 */
-  onOpenPlugin?: (key: string) => void;
-}) {
-  const navigate = useNavigate();
-  const openPlugin =
-    onOpenPlugin ??
-    ((key: string) => {
-      void navigate({ to: "/admin/apps/$id/p/$plugin", params: { id: String(app.id), plugin: key } });
-    });
+export function PluginsTab({ app, onOpenPlugin }: { app: AdminAppItem; onOpenPlugin: (key: string) => void }) {
   const installs = useAdminAppPluginInstallsQuery(app.id);
   // 目录一次取满一页（后端上限 100）。取不满时下面会明说"只显示前 N 个"，
   // 静默截断会让管理员以为插件丢了。
@@ -74,6 +64,17 @@ export function PluginsTab({ app, onOpenPlugin }: {
           <span className="blk-title">已安装</span>
           <span className="muted small">{installItems.length} 个</span>
           <span className="plugin-sec__grow" />
+          {/* 开发手册由后端从类型矩阵/上限/错误码生成：与当前部署能力同源，
+              所以这里下的是"真文档"，不是仓库里另一份会过期的 md。 */}
+          <button
+            type="button"
+            className="btn btn-sm btn-text"
+            onClick={() => {
+              void downloadPluginDevDoc().catch((err) => toastApiError(err, "下载失败"));
+            }}
+          >
+            开发文档
+          </button>
           <button type="button" className="btn btn-sm btn-primary" onClick={() => setImportOpen(true)}>
             导入插件
           </button>
@@ -103,7 +104,7 @@ export function PluginsTab({ app, onOpenPlugin }: {
                     <button
                       type="button"
                       className="btn btn-sm btn-text"
-                      onClick={() => openPlugin(it.plugin_key)}
+                      onClick={() => onOpenPlugin(it.plugin_key)}
                     >
                       打开
                     </button>

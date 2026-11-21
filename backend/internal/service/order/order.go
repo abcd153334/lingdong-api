@@ -83,9 +83,15 @@ func New(gdb *gorm.DB) *Service { return &Service{db: gdb} }
 
 // View 是订单对外视图（门户/管理台共用）。
 type View struct {
-	ID         uint64 `json:"id"`
-	UserID     uint64 `json:"user_id"`
-	Username   string `json:"username,omitempty"`
+	ID       uint64 `json:"id"`
+	UserID   uint64 `json:"user_id"`
+	Username string `json:"username,omitempty"`
+	// AppID 是订单归属的应用（0 = 平台直连）。**不下发省略**：0 有业务含义，
+	// 前端要据此显示「平台直连」，用 omitempty 会让"没有应用"和"字段没下发"混为一谈。
+	AppID uint64 `json:"app_id"`
+	// AppName 是应用的展示名（display_name 优先），由 controller 批量补齐；
+	// 0/查不到时为空串，前端自行渲染「平台直连」或「—」。
+	AppName    string `json:"app_name,omitempty"`
 	OutTradeNo string `json:"out_trade_no"`
 	TradeNo    string `json:"trade_no,omitempty"`
 	// AmountCent 是订单金额（**分**，支付渠道最小单位）。
@@ -248,7 +254,14 @@ type ListFilter struct {
 	UserID uint64
 	// AppID 非 0 时只返回该应用下的订单（托管密钥的隔离维度）。
 	// 0 = 不按应用过滤（门户 / 会话票 / 自建 KEY）。
-	AppID        uint64
+	AppID uint64
+	// AppScoped 让「只看平台直连（app_id=0）」成为可表达的筛选。
+	//
+	// 为什么不能把上面的 AppID 语义改成「0 也过滤」：门户/会话票下单路径
+	// 会把 AppID=0 传进来表达"不按应用过滤"（controller/order.go 的 appFilterOf），
+	// 改语义会让它们突然只看平台直连，订单列表直接少一大半。
+	// 因此保留 AppID 的旧语义，另加这个显式开关：AppScoped=true 时 AppID=0 也参与过滤。
+	AppScoped    bool
 	Status       string
 	PayChannelID string
 	PayChannel   string
@@ -897,7 +910,7 @@ func (s *Service) List(ctx context.Context, f ListFilter) ([]View, int64, error)
 		if f.UserID != 0 {
 			q = q.Where("user_id = ?", f.UserID)
 		}
-		if f.AppID != 0 {
+		if f.AppScoped || f.AppID != 0 {
 			q = q.Where("app_id = ?", f.AppID)
 		}
 		if f.Status != "" {
@@ -1127,7 +1140,7 @@ func toView(o *model.Order) View {
 		tradeNo = *o.TradeNo
 	}
 	return View{
-		ID: o.ID, UserID: o.UserID, OutTradeNo: o.OutTradeNo, TradeNo: tradeNo,
+		ID: o.ID, UserID: o.UserID, AppID: o.AppID, OutTradeNo: o.OutTradeNo, TradeNo: tradeNo,
 		AmountCent: o.AmountCent, Credited: o.Credited,
 		Currency: currencyOf(o),
 		Status:   o.Status, PayChannel: o.PayChannel,

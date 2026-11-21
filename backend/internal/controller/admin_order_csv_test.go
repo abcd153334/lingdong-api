@@ -17,7 +17,7 @@ import (
 func TestOrderCSVColumns(t *testing.T) {
 	paidAt := time.Date(2026, 10, 24, 10, 30, 0, 0, time.UTC)
 	items := []order.View{{
-		ID: 1, UserID: 7, OutTradeNo: "LD2026102400000000001",
+		ID: 1, UserID: 7, AppID: 5, AppName: "官网门户", OutTradeNo: "LD2026102400000000001",
 		AmountCent: 7200, Currency: "CNY", Credited: 79_200_000,
 		PackageName: "标准包", Status: "paid",
 		PayChannel: "易支付-微信支付", PayChannelID: "epay", PayProtocol: "epay",
@@ -51,5 +51,28 @@ func TestOrderCSVColumns(t *testing.T) {
 	}
 	if got := row[3]; got != "72.00" {
 		t.Fatalf("金额列（分→元）应为 72.00，实际 %q", got)
+	}
+
+	// 应用两列**追加在尾部**（18/19 列）：插在中间会让按索引取列的旧脚本静默错列。
+	if len(header) != 19 {
+		t.Fatalf("表头应为 19 列（17 + 应用ID/应用），实际 %d 列：%s", len(header), lines[0])
+	}
+	if header[17] != "应用ID" || header[18] != "应用" {
+		t.Fatalf("末两列应为 应用ID/应用，实际 %q/%q", header[17], header[18])
+	}
+	if row[17] != "5" || row[18] != "官网门户" {
+		t.Fatalf("应用列应为 5/官网门户，实际 %q/%q", row[17], row[18])
+	}
+
+	// 平台直连（app_id=0）：必须输出「平台直连」而不是空白 ——
+	// 空白单元格在 Excel 里会被读成"这条数据缺字段"，而不是"这笔钱没归属应用"。
+	direct := []order.View{{ID: 2, UserID: 8, OutTradeNo: "LD2", Status: "paid", CreatedAt: paidAt}}
+	dl := strings.Split(strings.TrimRight(orderCSV(direct, nil), "\n"), "\n")
+	if len(dl) != 2 {
+		t.Fatalf("平台直连用例应输出 1 行数据，实际 %d 行", len(dl)-1)
+	}
+	drow := strings.Split(dl[1], ",")
+	if drow[17] != "0" || drow[18] != "平台直连" {
+		t.Fatalf("平台直连应输出 0/平台直连，实际 %q/%q", drow[17], drow[18])
 	}
 }

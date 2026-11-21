@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 
@@ -18,6 +19,7 @@ import (
 	"lingdong-api/internal/pkg/response"
 	"lingdong-api/internal/pkg/siteurl"
 	"lingdong-api/internal/service/appplugins"
+	"lingdong-api/internal/service/appplugins/devdoc"
 	"lingdong-api/internal/service/audit"
 	"lingdong-api/internal/service/iconref"
 	"lingdong-api/internal/service/logs"
@@ -47,6 +49,29 @@ func AdminAppPluginList(c *gin.Context) {
 		items[i].IconURL = iconref.URL(base, items[i].Icon)
 	}
 	response.OK(c, pagination.New(items, total, p))
+}
+
+// AdminAppPluginDevDoc 下发**由代码生成**的插件开发手册（markdown）。
+//
+// 与页面同源：正文与表格都来自 devdoc（常量 + 类型矩阵 + 上限 + 错误码），
+// 不是仓库里另存的一份 md —— 否则"下载到的手册"会和当前部署能力脱节，
+// 而这正是手写文档已经发生过的问题。
+//
+// 文件名用 ASCII 兜底 + RFC 5987 的中文名：safeFilename 只保留 ASCII 字符，
+// 直接写中文会被部分浏览器截成空文件名。
+func AdminAppPluginDevDoc(c *gin.Context) {
+	body := []byte(devdoc.Markdown())
+	const ct = "text/markdown; charset=utf-8"
+	c.Header("Content-Type", ct)
+	c.Header("Content-Disposition",
+		`attachment; filename="plugin-dev-manual.md"; filename*=UTF-8''`+url.PathEscape(devdoc.FileName))
+	c.Header("X-Content-Type-Options", "nosniff")
+	// 弱 ETag + no-cache：同一份构建下内容恒定（反复下载走 304），
+	// 换构建后 ETag 自然变化，不会把旧手册当新手册。
+	if writeETag(c, body, 0, false, true) {
+		return
+	}
+	c.Data(http.StatusOK, ct, body)
 }
 
 // AdminAppPluginSample 下发内置示例模板（不落库，见 appplugins.SampleManifest 注释）。
@@ -261,16 +286,19 @@ func AdminAppPluginPatch(c *gin.Context) {
 		response.FailDefMsg(c, errs.InvalidParam, "没有要修改的内容")
 		return
 	}
-	row, err := appplugins.Patch(c.Request.Context(), db.DB, app.ID, c.Param("key"), in)
+	row, dropped, err := appplugins.Patch(c.Request.Context(), db.DB, app.ID, c.Param("key"), in)
 	if err != nil {
 		respondPluginErr(c, err)
 		return
 	}
 	// 配置与启停分开记账：一个是"改行为参数"，一个是"开关服务"，追责等级不同。
-	if in.Config != nil {
+	//
+	// dropped_config_keys：这次保存顺带清掉了当前 manifest 不承认的旧键。
+	// 清理是对的（否则任何保存都 422），但会真的删数据，必须留痕。
+	if in.Config != nil || len(dropped) > 0 {
 		audit.RecordOrWarn(db.DB, c.GetUint64("user_id"), audit.ActionAppPluginConfig,
 			"app_plugin_install", fmt.Sprintf("%d/%s", app.ID, c.Param("key")),
-			gin.H{"app_id": app.ID, "plugin_key": c.Param("key")})
+			gin.H{"app_id": app.ID, "plugin_key": c.Param("key"), "dropped_config_keys": dropped})
 	}
 	if in.PublicEnabled != nil {
 		audit.RecordOrWarn(db.DB, c.GetUint64("user_id"), audit.ActionAppPluginPublic,
@@ -337,7 +365,7 @@ func AdminAppPluginRecordList(c *gin.Context) {
 		return
 	}
 	items, total, err := appplugins.ListRecords(c.Request.Context(), db.DB, app.ID,
-		c.Param("key"), entity, c.Query("keyword"), p.Offset(), p.Limit())
+		c.Param("key"), entity, p, c.Request.URL.Query())
 	if err != nil {
 		respondPluginErr(c, err)
 		return
@@ -423,6 +451,43 @@ func AdminAppPluginRecordDelete(c *gin.Context) {
 	response.OK(c, gin.H{"record_key": c.Param("rk")})
 }
 
+type pluginRecordBatchDeleteReq struct {
+	Entity     string   `json:"entity"`
+	RecordKeys []string `json:"record_keys"`
+}
+
+// AdminAppPluginRecordBatchDelete 批量删除（单事务）。
+//
+// 审计的 target_id 只有 64 字符，装不下 100 个 record_key：记"哪个插件的哪一批"（batch:<key>），
+// 明细留前 20 个并标 keys_truncated —— 够定位，不会把审计撑爆。
+func AdminAppPluginRecordBatchDelete(c *gin.Context) {
+	app, ok := appOf(c)
+	if !ok {
+		return
+	}
+	var req pluginRecordBatchDeleteReq
+	if err := c.ShouldBindJSON(&req); err != nil || req.Entity == "" || len(req.RecordKeys) == 0 {
+		response.FailDefMsg(c, errs.InvalidParam, "缺少数据对象或待删除记录")
+		return
+	}
+	n, err := appplugins.BatchDelete(c.Request.Context(), db.DB, app.ID, c.Param("key"), req.Entity, req.RecordKeys)
+	if err != nil {
+		respondPluginErr(c, err)
+		return
+	}
+	keys := req.RecordKeys
+	if len(keys) > 20 {
+		keys = keys[:20]
+	}
+	audit.RecordOrWarn(db.DB, c.GetUint64("user_id"), audit.ActionAppPluginRecordBatchDelete,
+		"app_plugin_record", "batch:"+c.Param("key"), gin.H{
+			"app_id": app.ID, "plugin_key": c.Param("key"), "entity": req.Entity,
+			"deleted": n, "requested": len(req.RecordKeys),
+			"record_keys": keys, "keys_truncated": len(req.RecordKeys) > len(keys),
+		})
+	response.OK(c, gin.H{"deleted": n})
+}
+
 // AdminAppPluginRecordExport 流式导出 CSV。
 //
 // 不复用 admin_log.go 的 writeCSV：那个是全量拼串 + 一次写出，5 万行 JSONB
@@ -435,8 +500,13 @@ func AdminAppPluginRecordExport(c *gin.Context) {
 	}
 	key := c.Param("key")
 	entity := c.Query("entity")
-	keyword := c.Query("keyword")
-	e, _, err := appplugins.ExportPlan(c.Request.Context(), db.DB, app.ID, key, entity, keyword)
+	p, err := pagination.Parse(c)
+	if err != nil {
+		response.FailDef(c, errs.InvalidParam)
+		return
+	}
+	// 导出吃与列表**同一份** Query：屏幕上筛过什么，导出的就是同一批行。
+	e, q, _, err := appplugins.ExportPlan(c.Request.Context(), db.DB, app.ID, key, entity, p, c.Request.URL.Query())
 	if err != nil {
 		respondPluginErr(c, err)
 		return
@@ -468,7 +538,7 @@ func AdminAppPluginRecordExport(c *gin.Context) {
 			_, _ = io.WriteString(w, joinCSV(header)+"\r\n")
 			return true
 		}
-		rows, err := appplugins.ExportBatch(c.Request.Context(), db.DB, app.ID, key, entity, keyword, afterID, batch)
+		rows, err := appplugins.ExportBatch(c.Request.Context(), db.DB, app.ID, key, entity, e, q, afterID, batch)
 		if err != nil || len(rows) == 0 {
 			return false
 		}
@@ -506,6 +576,13 @@ func truncateSnapshot(v map[string]any) any {
 // 校验类错误必须带 problems（前端要逐条定位到字段），所以走 FailDefData；
 // 其余交给 DefOr，避免这里再写一遍 switch。
 func respondPluginErr(c *gin.Context, err error) {
+	// 查询参数不合法是 400（不是 422 的 problems）：这类错误的读者是地址栏，
+	// 消息必须直接说清"哪一项、能取什么"，否则管理员只能猜。
+	var qe *appplugins.QueryError
+	if errors.As(err, &qe) {
+		response.FailDefMsg(c, errs.InvalidParam, qe.Msg)
+		return
+	}
 	var invalid *appplugins.InvalidError
 	if errors.As(err, &invalid) {
 		def := errs.PluginManifestInvalid

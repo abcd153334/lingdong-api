@@ -95,7 +95,7 @@ func Parse(c *gin.Context) (Params, error) {
 		p.PageSize = n
 	}
 	if v := c.Query("sort"); v != "" {
-		field, desc, err := parseSort(v)
+		field, desc, err := ParseSort(v)
 		if err != nil {
 			return p, fmt.Errorf("%w: %s", ErrInvalid, err.Error())
 		}
@@ -106,7 +106,11 @@ func Parse(c *gin.Context) (Params, error) {
 	return p, nil
 }
 
-func parseSort(v string) (field string, desc bool, err error) {
+// ParseSort 解析 `field:asc|desc`。
+//
+// 导出是为了让非 HTTP 调用方（服务层测试、内部工具）用**同一份**实现：
+// 各写一遍 split(":") 的话，"什么算合法排序参数"会出现第二个口径。
+func ParseSort(v string) (field string, desc bool, err error) {
 	parts := strings.Split(v, ":")
 	if len(parts) != 2 {
 		return "", false, fmt.Errorf("sort 非法")
@@ -161,7 +165,7 @@ func ParseOptional(c *gin.Context) (p Params, all bool, err error) {
 		p.PageSize = n
 	}
 	if v := c.Query("sort"); v != "" {
-		field, desc, serr := parseSort(v)
+		field, desc, serr := ParseSort(v)
 		if serr != nil {
 			return p, false, fmt.Errorf("%w: %s", ErrInvalid, serr.Error())
 		}

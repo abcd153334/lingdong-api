@@ -103,7 +103,10 @@ test.describe("S7 异步任务 · 管理台", () => {
     // 筛选条对齐原型：仅「状态」一个字段（无模型/用户 ID）
     await expect(page.locator(".pbar-fields select")).toHaveCount(1);
     await expect(page.locator('.pbar input[type="search"]')).toHaveCount(0);
-    await expect(page.locator('.pbar input[type="text"]')).toHaveCount(0);
+    // 应用筛选的触发器是**可搜索输入框**（type="text"）：它是页面内控件，
+    // 不是 portal 出去的面板，所以会出现在 .pbar 里。原先这里断言 0 是因为
+    // 当时只有「状态」一个下拉；加了应用维度后它是 1。
+    await expect(page.locator('.pbar input[type="text"]')).toHaveCount(1);
 
     // 表头列
     const head = page.locator(".tbl thead");
@@ -271,5 +274,37 @@ test.describe("S7 异步任务 · 统一详情抽屉", () => {
     await expect(drawer).toContainText("#3 · #7");
     await expect(drawer).toContainText("openai · #1");
     await expect(drawer).toContainText("up_55");
+  });
+});
+
+/** 应用筛选：选项来自 /admin/apps/options，选中后 app_id 必须进查询串。 */
+const APP_OPTIONS_TASK = [
+  { id: 5, slug: "web-portal", name: "web-portal", display_name: "官网门户", status: 1 },
+  { id: 9, slug: "shadow", name: "影画", display_name: "", status: 2 },
+];
+
+test.describe("S7 异步任务 · 按应用筛选", () => {
+  test("选应用后请求带 app_id，表格出现应用列", async ({ page }) => {
+    await seedAuth(page, { role: 0 });
+    await stubAdmin(page);
+    await page.route("**/api/admin/apps/options**", (route) =>
+      route.fulfill({ json: envelope({ items: APP_OPTIONS_TASK, truncated: false }) }),
+    );
+    const seen: string[] = [];
+    await page.route("**/api/admin/tasks?**", (route) => {
+      seen.push(route.request().url());
+      return route.fulfill({
+        json: envelope({ items: [TASK], total: 1, page: 1, page_size: 20 }),
+      });
+    });
+
+    await page.goto("/admin/tasks");
+    await expect(page.locator(".tbl thead")).toContainText("应用");
+
+    // 「应用」是唯一带这个可访问名的 combobox
+    await page.getByRole("combobox", { name: "应用" }).click();
+    await page.getByRole("option", { name: /官网门户/ }).click();
+
+    await expect.poll(() => seen.some((u) => u.includes("app_id=5"))).toBe(true);
   });
 });

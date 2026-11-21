@@ -634,7 +634,10 @@ data: {"type":"message_stop"}`,
 			ret("expires_at", TypeString, "过期时间（RFC3339，带时区）。"),
 			ret("remaining_seconds", TypeInteger, "距过期的剩余秒数；过期后按不存在处理。"),
 		},
-		MaxBody: "以系统配置为准（默认 50MB）",
+		// MaxBody 落 doc_endpoints.max_body，列宽 **varchar(32)**（model/doc_content.go:129）。
+		// 写成一句长说明会在播种时炸 SQLSTATE 22001，整站种子全部落失败 ——
+		// 所以这里只能是短值（「25MB」「1MB」同款）。长解释属于 deploy/README.md。
+		MaxBody: "以系统配置为准（出厂 200MB）",
 		Notes: []string{
 			"限额由系统配置统一下发：单文件大小 / 每密钥每日次数 / 账号总存储 / 并发数，控制台改完即时生效。",
 			"直链无需鉴权，厂商可直接拉取；按 IP 限流，视频任务一次提交多张图会并发取图，注意收敛。",

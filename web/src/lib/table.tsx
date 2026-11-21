@@ -227,15 +227,23 @@ export interface OrderRowLike {
  */
 export function orderColumns<T extends OrderRowLike>(extras: {
   user?: (row: T) => ReactNode;
+  /**
+   * 所属应用（管理台传；门户不传 → 门户列不变）。
+   *
+   * 必须是**可选槽位**而不是常驻列：门户钱包里的订单全是"平台直连"，
+   * 给它一列应用只会多出一列全是「—」的噪音。
+   */
+  app?: (row: T) => ReactNode;
   /** 套餐名（管理台传；门户不传 → 门户列不变） */
   packageName?: (row: T) => ReactNode;
   payChannel?: (row: T) => ReactNode;
   actions?: (row: T) => RowAction[] | null;
 } = {}): ColumnDef<T, unknown>[] {
-  const { user, packageName, payChannel, actions } = extras;
+  const { user, app, packageName, payChannel, actions } = extras;
   return [
     monoCol<T>("out_trade_no", "订单号", (r) => r.out_trade_no, { small: true, minWidth: 170 }),
     ...(user ? [renderCol<T>("user", "用户", () => null, user, { priority: 3 })] : []),
+    ...(app ? [renderCol<T>("app", "应用", () => null, app, { priority: 3 })] : []),
     centCol<T>((r) => r.amount_cent, { currency: (r) => r.currency }),
     moneyCol<T>((r) => r.credited, {
       label: "到账金额",
@@ -365,6 +373,8 @@ export interface LogRowLike {
  */
 export function logsColumns<T extends LogRowLike>(opts: {
   onDetail: (row: T) => void;
+  /** 所属应用（管理台传；门户「最近调用」不传 → 列不变） */
+  app?: (row: T) => ReactNode;
 }): ColumnDef<T, unknown>[] {
   return [
     timeCol<T>((r) => r.created_at),
@@ -374,6 +384,7 @@ export function logsColumns<T extends LogRowLike>(opts: {
     renderCol<T>("key_name", "KEY", (r) => r.key_name, (r) => (
       <span className="mono muted">{r.key_name || "—"}</span>
     ), { priority: 3 }),
+    ...(opts.app ? [renderCol<T>("app", "应用", () => null, opts.app, { priority: 3 })] : []),
     modelCol<T>((r) => r.model, "模型", "model", { iconUrlOf: (r) => r.model_icon_url }),
     renderCol<T>("channel_name", "渠道", (r) => r.channel_name, (r) =>
       r.channel_name ? (

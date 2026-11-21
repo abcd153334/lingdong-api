@@ -16,7 +16,7 @@ import { AppKeysDrawer } from "./apps/AppKeysDrawer";
 import { AppManageDialog } from "./apps/AppManageDialog";
 
 /**
- * 接入应用：卡片列表。
+ * 应用管理：卡片列表。
  *
  * 这一页存在的理由：对外 API 的归属锚点是应用（`api_keys.app_id` →
  * `usages.key_id` → 消费归因）。卡片回答"这个应用现在是什么状态"，
@@ -111,7 +111,7 @@ export function AdminAppsPage() {
   return (
     <>
       <PageHead
-        title="接入应用"
+        title="应用管理"
         desc="对外接口的归属主体：密钥、订单与消费按应用归因"
         actions={[{ type: "btn", label: "新建应用", variant: "primary", onClick: () => setCreating(true) }]}
       />
@@ -160,7 +160,7 @@ export function AdminAppsPage() {
         />
       ) : items.length === 0 ? (
         <EmptyState
-          title={Object.keys(values).length ? "没有符合条件的应用" : "还没有接入应用"}
+          title={Object.keys(values).length ? "没有符合条件的应用" : "还没有应用"}
           desc={
             Object.keys(values).length
               ? "试试清空筛选条件"

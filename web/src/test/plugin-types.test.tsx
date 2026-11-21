@@ -7,6 +7,8 @@ import {
   fieldKeyOfPath,
   inputTypeOf,
   isMultiline,
+  normalizeEntities,
+  normalizeEntity,
   toFormValues,
   toPayload,
 } from "@/lib/pluginTypes";
@@ -32,15 +34,55 @@ describe("pluginTypes", () => {
     expect(values.ticketNo).toBe("T-1");
     expect(values.done).toBe(false);
 
-    const payload = toPayload({ key: "e", name: "E", unique: "", fields: FIELDS, list: { columns: [], actions: [] }, public: [] }, values);
+    const payload = toPayload({ key: "e", name: "E", unique: "", fields: FIELDS, list: { columns: [], actions: [], sort: [], filters: [] }, form: { sections: [] }, public: [] }, values);
     expect(payload).toEqual({ ticketNo: "T-1", count: 3, done: false });
   });
 
   it("清空字段：空串不出现在请求体里", () => {
     const values = toFormValues(FIELDS, { ticketNo: "T-1", detail: "写过的备注" });
     values.detail = "";
-    const payload = toPayload({ key: "e", name: "E", unique: "", fields: FIELDS, list: { columns: [], actions: [] }, public: [] }, values);
+    const payload = toPayload({ key: "e", name: "E", unique: "", fields: FIELDS, list: { columns: [], actions: [], sort: [], filters: [] }, form: { sections: [] }, public: [] }, values);
     expect("detail" in payload).toBe(false);
+  });
+
+  // 描述字段是**叠加式**扩展点：前端热更新、后端要重启，两者不同步是常态。
+  // 归一化必须把"缺字段"变成"能力更少"，而不是让 `undefined[0]` 崩掉整个弹窗。
+  it("normalizeEntity：旧后端缺 sort/filters/form 时退化成单段单列", () => {
+    const legacy = {
+      key: "e",
+      name: "E",
+      unique: "ticketNo",
+      fields: FIELDS,
+      list: { columns: [{ key: "ticketNo", label: "单号", type: "string" }], actions: ["create"] },
+      public: [],
+    } as unknown as Parameters<typeof normalizeEntity>[0];
+
+    const e = normalizeEntity(legacy);
+    expect(e.list.sort).toEqual([]);
+    expect(e.list.filters).toEqual([]);
+    expect(e.list.columns).toHaveLength(1);
+    // 没有 form ⇒ 全部字段进一个无标题段，顺序与声明一致
+    expect(e.form.sections).toHaveLength(1);
+    expect(e.form.sections[0].title).toBe("");
+    expect(e.form.sections[0].columns).toBe(1);
+    expect(e.form.sections[0].fields).toEqual(FIELDS.map((f) => f.key));
+  });
+
+  it("normalizeEntity：已有 form 原样保留，不做二次排版", () => {
+    const full = {
+      key: "e",
+      name: "E",
+      unique: "",
+      fields: FIELDS,
+      list: { columns: [], actions: [], sort: [], filters: [] },
+      form: { sections: [{ title: "基本信息", columns: 2 as const, fields: ["ticketNo", "status"] }] },
+      public: [],
+    };
+    expect(normalizeEntity(full).form).toEqual(full.form);
+  });
+
+  it("normalizeEntities：undefined 归一成空数组（描述还没到不该崩）", () => {
+    expect(normalizeEntities(undefined)).toEqual([]);
   });
 
   it("cellText：布尔写是/否，空值写破折号", () => {

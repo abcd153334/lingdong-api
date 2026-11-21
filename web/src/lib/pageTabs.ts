@@ -33,6 +33,8 @@ export interface PageTab<K extends string = string> {
   disabled?: boolean;
   /** 前置图标（透传给 Tabs；漏传的表现是"图标静默不渲染"） */
   icon?: IconName;
+  /** 单项附加类名（透传给 Tabs，仅用于逐项定位的布局，不用于配色） */
+  className?: string;
 }
 
 export interface UsePageTabsOptions {

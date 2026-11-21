@@ -27,3 +27,24 @@ func optionalUintQuery(c *gin.Context, name string) (uint64, bool) {
 	}
 	return v, true
 }
+
+// appScopeQuery 解析 `?app_id=`（**三态**，不能复用 optionalUintQuery）。
+//
+// 返回：(0,false,true) 未传；(0,true,true) 只看平台直连；(n,true,true) 只看该应用；
+// (_,_,false) 传了非法值 —— 调用方必须 400。
+//
+// 为什么不复用 optionalUintQuery：它对 "" 与 "0" 都返回 (0,true)，而 `app_id=0`
+// 是有业务含义的（平台直连：用户在门户/开放 API 自充的订单、用自建密钥产生的
+// 调用与任务）。若把 0 当成"没传"，运营点开「平台直连」会拿到全量数据 ——
+// 数据看起来正常、结论全错，且没有任何报错，这是最难排查的一类失败。
+func appScopeQuery(c *gin.Context) (id uint64, scoped, ok bool) {
+	raw := strings.TrimSpace(c.Query("app_id"))
+	if raw == "" {
+		return 0, false, true
+	}
+	v, err := strconv.ParseUint(raw, 10, 64)
+	if err != nil {
+		return 0, false, false
+	}
+	return v, true, true
+}

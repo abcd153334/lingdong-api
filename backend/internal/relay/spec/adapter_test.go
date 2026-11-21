@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"unicode/utf8"
 
 	"lingdong-api/internal/relay"
 )
@@ -229,5 +230,28 @@ func TestAdapterUnsupportedEndpoint(t *testing.T) {
 		t.Fatal("未声明的端点应报错")
 	} else if _, ok := err.(*relay.ConfigError); !ok {
 		t.Fatalf("应为 ConfigError，实际 %T: %v", err, err)
+	}
+}
+
+// TestExtractMessageKeepsUTF8Valid 锁住「按字符截断」。
+//
+// 旧实现是 `s[:300]+"…"`（按字节），一旦切点多字节字符中间就产出非法 UTF-8，
+// 写进 usages.error_msg 时 PG 报 22021，结算/释放事务整体回滚。
+func TestExtractMessageKeepsUTF8Valid(t *testing.T) {
+	// 2 字节 ASCII 前缀 + 中文：第 300 个字节正好落在某个汉字中间。
+	body := []byte(`{"error":{"message":"ab` + strings.Repeat("中文", 200) + `"}}`)
+
+	got := extractMessage(body, "error.message")
+	if !utf8.ValidString(got) {
+		t.Fatalf("产出非法 UTF-8: %q", got)
+	}
+	if n := utf8.RuneCountInString(got); n > maxMessageRunes {
+		t.Fatalf("截断后 %d 字符，超过 %d", n, maxMessageRunes)
+	}
+
+	// 非 JSON 兜底分支同样不得拼出非法串。
+	raw := []byte("ab" + strings.Repeat("中文", 200))
+	if got := extractMessage(raw, ""); !utf8.ValidString(got) {
+		t.Fatalf("兜底分支产出非法 UTF-8: %q", got)
 	}
 }

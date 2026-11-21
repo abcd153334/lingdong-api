@@ -111,32 +111,42 @@ func TestBodyLimitPortalJSONUnchanged(t *testing.T) {
 	}
 }
 
-// TestBodyLimitDefaultTierBounded 守住 C2：非 /v1、非 JSON、非 multipart 的
-// 请求体以前**完全不设上限**（把 Content-Type 写成 text/plain 就绕开了 1 MiB 门）。
-// 现在必须落到上传总上限这一档：既不无限，也不把 multipart 上传压到 1 MiB。
-func TestBodyLimitDefaultTierBounded(t *testing.T) {
+// TestBodyLimitPathTiers 守住 C2：分档**按路径**，不看 Content-Type。
+//
+// 旧实现的判据是「路径不以 /v1/ 开头 **且** Content-Type 含 application/json」，
+// 于是把 Content-Type 写成 text/plain 就能让未认证端点收到上传总上限（默认 201 MiB）。
+// 现在默认 1 MiB，只有登记过的上传入口才放开。
+func TestBodyLimitPathTiers(t *testing.T) {
 	withUploadsConfig(t, map[string]int64{
 		uploadcfg.KindImage: 2, uploadcfg.KindAudio: 2, uploadcfg.KindVideo: 3,
 		uploadcfg.KindDocument: 2, uploadcfg.KindText: 1,
 	})
 
-	// 2 MiB text/plain 必须放行：这一档是「上传总上限」，不是门户 JSON 的 1 MiB。
-	small := make([]byte, 2<<20)
-	if _, err := readThroughBodyLimit(t, "/api/portal/other", "text/plain", small); err != nil {
-		t.Fatalf("2 MiB text/plain 应放行（档位 = 上传总上限）：%v", err)
+	// 1) 非上传路径：不论 Content-Type 是什么，都只有 1 MiB。
+	//    multipart 也要拦 —— 它同样不在登记表里。
+	for _, ctype := range []string{"text/plain", "", "application/json", "multipart/form-data"} {
+		big := make([]byte, 2<<20)
+		_, err := readThroughBodyLimit(t, "/api/portal/other", ctype, big)
+		var mbe *http.MaxBytesError
+		if !errors.As(err, &mbe) {
+			t.Fatalf("Content-Type=%q 时 2 MiB 应被 1 MiB 门拦下（旧实现只拦 JSON，改个头就绕过）", ctype)
+		}
 	}
 
-	// 5 MiB 必须被拦：以前这里是无限的。
-	big := make([]byte, 5<<20)
-	_, err := readThroughBodyLimit(t, "/api/portal/other", "text/plain", big)
-	var mbe *http.MaxBytesError
-	if !errors.As(err, &mbe) {
-		t.Fatalf("5 MiB text/plain 应被门拦下（MaxBytesError），实际 err=%v", err)
-	}
-
-	// 完全没有 Content-Type 的请求也要被同一档兜住（curl -d 不带 header 就长这样）。
-	_, err = readThroughBodyLimit(t, "/api/portal/other", "", big)
-	if !errors.As(err, &mbe) {
-		t.Fatalf("5 MiB 无 Content-Type 也应被拦下，实际 err=%v", err)
+	// 2) 登记过的上传入口：落到上传总上限（此配置下 = 3MB + 1MB 开销）。
+	//    /v1beta 与 /suno 不以 /v1/ 开头，漏登记就会被 1 MiB 误杀。
+	for _, path := range []string{
+		"/v1/files",
+		"/v1/images/edits",
+		"/v1beta/models/gemini-2.0:generateContent",
+		"/suno/submit/music",
+		"/api/portal/files",
+		"/api/portal/me/avatar",
+		"/api/admin/icons",
+	} {
+		small := make([]byte, 2<<20)
+		if _, err := readThroughBodyLimit(t, path, "multipart/form-data", small); err != nil {
+			t.Fatalf("%s 的 2 MiB 上传应放行：%v", path, err)
+		}
 	}
 }

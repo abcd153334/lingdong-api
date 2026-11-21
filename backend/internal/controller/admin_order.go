@@ -1,6 +1,7 @@
 package controller
 
 import (
+	"context"
 	"strconv"
 	"strings"
 	"time"
@@ -14,6 +15,7 @@ import (
 	"lingdong-api/internal/pkg/money"
 	"lingdong-api/internal/pkg/pagination"
 	"lingdong-api/internal/pkg/response"
+	"lingdong-api/internal/service/appref"
 	"lingdong-api/internal/service/audit"
 	"lingdong-api/internal/service/logs"
 	"lingdong-api/internal/service/order"
@@ -23,7 +25,7 @@ import (
 // 订单导出上限：单次最多 5 万行（与兑换码/审计导出一致）。
 const orderExportLimit = 50000
 
-// orderFilterOf 解析列表/导出共用的筛选条件（status 白名单校验；user_id/pay_channel 精确匹配）。
+// orderFilterOf 解析列表/导出共用的筛选条件（status 白名单校验；user_id/pay_channel/app 精确匹配）。
 func orderFilterOf(c *gin.Context) (order.ListFilter, bool) {
 	status := strings.TrimSpace(c.Query("status"))
 	if status != "" && !orderStatuses[status] {
@@ -37,8 +39,14 @@ func orderFilterOf(c *gin.Context) (order.ListFilter, bool) {
 		}
 		userID = v
 	}
+	appID, appScoped, ok := appScopeQuery(c)
+	if !ok {
+		return order.ListFilter{}, false
+	}
 	return order.ListFilter{
 		UserID:       userID,
+		AppID:        appID,
+		AppScoped:    appScoped,
 		Status:       status,
 		PayChannelID: strings.TrimSpace(c.Query("pay_channel_id")),
 		PayChannel:   strings.TrimSpace(c.Query("pay_channel")),
@@ -106,6 +114,10 @@ func AdminOrderList(c *gin.Context) {
 	for i := range items {
 		items[i].PackageName = pkgs[items[i].PackageID]
 	}
+	if err := fillAppNames(c.Request.Context(), items); err != nil {
+		response.FailDef(c, errs.Internal)
+		return
+	}
 	response.OK(c, adminOrderListResult{
 		Items: items, Total: total, Page: p.Page, PageSize: p.PageSize,
 		PayChannels: payChannelBriefs(),
@@ -162,6 +174,35 @@ func packageNames(items []order.View) map[uint64]string {
 	return names
 }
 
+// fillAppNames 批量补齐订单所属应用的展示名（IN 一次查回，无 N+1）。
+//
+// 口径与卡片一致：display_name 优先、回落后台名（见 appref.Names）。
+// app_id=0 的行（平台直连）不查库、AppName 保持空串 —— 前端与 CSV 都据
+// AppID==0 显示「平台直连」，而不是靠一个魔法字符串。
+//
+// 与 orderUsernames/packageNames 的差别：这两个函数查询失败只留空（名称缺失
+// 不影响对账），而应用名失败会**阻断**列表 —— 应用列是本轮需求的主角，
+// 静默变空等于功能没做，用户却看不出任何错误。
+func fillAppNames(ctx context.Context, items []order.View) error {
+	ids := make([]uint64, 0, len(items))
+	for _, it := range items {
+		if it.AppID != 0 {
+			ids = append(ids, it.AppID)
+		}
+	}
+	refs, err := appref.Names(ctx, db.DB, ids)
+	if err != nil {
+		return err
+	}
+	for i := range items {
+		if items[i].AppID == 0 {
+			continue
+		}
+		items[i].AppName = refs[items[i].AppID].Name
+	}
+	return nil
+}
+
 // AdminOrderExport 处理 GET /api/admin/orders/export：按当前筛选导出全部匹配订单 CSV（不分页，无数据返回空表头）。
 func AdminOrderExport(c *gin.Context) {
 	f, ok := orderFilterOf(c)
@@ -180,6 +221,12 @@ func AdminOrderExport(c *gin.Context) {
 	for i := range items {
 		items[i].PackageName = pkgs[items[i].PackageID]
 	}
+	// 导出与列表必须同源：名字都按同一批 id 补齐，否则「列表看到应用名、
+	// 导出却是空白」这种不一致只能靠人工发现。
+	if err := fillAppNames(c.Request.Context(), items); err != nil {
+		response.FailDef(c, errs.Internal)
+		return
+	}
 	writeCSV(c, "orders.csv", orderCSV(items, names))
 }
 
@@ -197,7 +244,9 @@ func orderCSV(items []order.View, names map[uint64]string) string {
 	var b strings.Builder
 	// 到账金额只有一列：旧表里的「额度 / 比例 / 倍率」三列是同一个数的三种写法，
 	// 对账时反而要先乘回去。现在库里只存一个最终金额（微），直接输出即可。
-	b.WriteString("订单号,用户ID,用户名,金额,币种,到账金额,套餐,状态,退款方式,退款状态,退款单号,支付渠道,渠道ID,协议,支付方式,创建时间,支付时间\n")
+	// 应用两列**追加在尾部**：对账脚本普遍按索引取列，插在中间等于静默错列；
+	// 追加只影响"多读一列"，前 17 列的位置一字未动。
+	b.WriteString("订单号,用户ID,用户名,金额,币种,到账金额,套餐,状态,退款方式,退款状态,退款单号,支付渠道,渠道ID,协议,支付方式,创建时间,支付时间,应用ID,应用\n")
 	for _, it := range items {
 		paidAt := ""
 		if it.PaidAt != nil {
@@ -224,7 +273,15 @@ func orderCSV(items []order.View, names map[uint64]string) string {
 		// 支付方式列输出中文：历史订单存原文、新订单存枚举 code，直接写 code 运营看不懂。
 		b.WriteString(logs.Esc(payment.MethodLabel(it.PayMethod)) + ",")
 		b.WriteString(it.CreatedAt.Format(time.RFC3339) + ",")
-		b.WriteString(paidAt + "\n")
+		b.WriteString(paidAt + ",")
+		b.WriteString(strconv.FormatUint(it.AppID, 10) + ",")
+		// 0 一律写「平台直连」：导出文件是给非技术对账人员看的，
+		// 空白单元格会被读成"这条数据缺字段"。
+		if it.AppID == 0 {
+			b.WriteString("平台直连\n")
+		} else {
+			b.WriteString(logs.Esc(it.AppName) + "\n")
+		}
 	}
 	return b.String()
 }

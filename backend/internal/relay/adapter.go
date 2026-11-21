@@ -18,7 +18,44 @@ import (
 )
 
 // DefaultAdapterTimeout 是适配器调用上游的默认超时（S5 可改为读 system_config）。
+//
+// 它同时约束**响应体读取**（http.Client.Timeout 覆盖到 body EOF），所以只适合
+// 秒级返回的端点。长耗时端点必须按族抬升（见 raiseTimeoutFor），否则会出现
+// "超时 → 归因为上游故障 → 换渠道重跑 → 同一份产物付两次"。
 const DefaultAdapterTimeout = 60 * time.Second
+
+// 长耗时端点的超时上限。
+//
+// 取值依据：反代 /v1/ 的 proxy_read_timeout 是 960s（deploy/nginx.conf），
+// 应用层不能再往上顶，否则客户端先拿到 nginx 的 504、而我们在后台继续等。
+const (
+	// ImageEndpointTimeout 覆盖同步出图（gpt-image / dall-e / 各家同步生图）。
+	// 实测最慢档（4K、多张）在 9 分钟内返回。
+	ImageEndpointTimeout = 10 * time.Minute
+	// AudioEndpointTimeout 覆盖 TTS 与长音频转写：整段音频要在一次请求里读完，
+	// 60s 会把正常的长文本朗读判成上游故障。
+	AudioEndpointTimeout = 5 * time.Minute
+)
+
+// raiseTimeoutFor 按端点族抬高 cfg.Timeout（只升不降）。
+//
+// cfg 是 channelConfig 每次请求新构造的，直接改字段是安全的；这里仍然只做
+// "取大"，避免把调用方显式配的更长时间压回去。
+func (c *ChannelConfig) raiseTimeoutFor(kind endpointKind) {
+	if c == nil {
+		return
+	}
+	var want time.Duration
+	switch {
+	case isImageKind(kind):
+		want = ImageEndpointTimeout
+	case kind == kindAudioSpeech || kind == kindAudioTranscriptions || kind == kindAudioTranslations:
+		want = AudioEndpointTimeout
+	}
+	if want > c.Timeout {
+		c.Timeout = want
+	}
+}
 
 // ErrUpstreamBodyTooLarge 表示上游响应体超过允许上限。
 //

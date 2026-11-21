@@ -15,6 +15,13 @@ export interface TabItem<K extends string = string> {
   disabled?: boolean;
   /** 前置图标（纯装饰，aria-hidden；可访问名仍只有 label） */
   icon?: IconName;
+  /**
+   * 单项附加类名，渲染到 `button.tab` 上。
+   *
+   * 用途只有一个：需要**逐项定位**的布局（例如应用管理弹窗里「插件」清单页签
+   * 恒靠最右的 `tab--pin`）。不要用它改颜色/字号 —— 那些归变体（`variant`）。
+   */
+  className?: string;
 }
 
 export interface TabsProps<K extends string = string> {
@@ -125,7 +132,7 @@ export function Tabs<K extends string = string>({
             aria-controls={panelId && selected ? panelId : undefined}
             disabled={it.disabled}
             tabIndex={it.disabled ? -1 : selected ? 0 : -1}
-            className={cn("tab", selected && "active")}
+            className={cn("tab", it.className, selected && "active")}
             onClick={() => onChange(it.key)}
           >
             {it.icon ? <Icon name={it.icon} size={14} className="tab-ico" /> : null}

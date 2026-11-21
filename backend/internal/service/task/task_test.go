@@ -310,7 +310,7 @@ func withTestDB(t *testing.T) *gorm.DB {
 	// Vendor / Model 必须建表：Retry 会走 pricing.Get() 校验「模型是否仍启用」，
 	// 缺表时失败点会停在 "relation vendors does not exist" 上，看起来像基础设施故障，
 	// 实际只是测试 schema 的建表清单没跟上被测代码新增的依赖。
-	if err := gdb.AutoMigrate(&model.User{}, &model.APIKey{}, &model.Usage{}, &model.Transaction{}, &model.Task{},
+	if err := gdb.AutoMigrate(&model.User{}, &model.App{}, &model.APIKey{}, &model.Usage{}, &model.Transaction{}, &model.Task{},
 		&model.Channel{}, &model.ModelBinding{}, &model.Vendor{}, &model.Model{}); err != nil {
 		t.Fatalf("迁移测试表失败: %v", err)
 	}

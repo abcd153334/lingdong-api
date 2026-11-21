@@ -11,14 +11,15 @@ async function stubAdminApi(page: Page): Promise<void> {
 }
 
 test.describe("管理台 chrome（桌面）", () => {
-  test("侧栏 15 项（4 组 + 3 顶级项）按分区渲染，当前项高亮，面包屑同步", async ({ page }) => {
+  test("侧栏 15 项（3 组 + 5 顶级项）按分区渲染，当前项高亮，面包屑同步", async ({ page }) => {
     await seedAdmin(page);
     await page.goto("/admin/dashboard");
     await expect(page.locator(".a-side")).toBeVisible();
     await expect(page.locator(".a-side nav a")).toHaveCount(15);
-    // 组头 4 个（仪表盘/系统配置/模型服务是顶级项，不画标题）；7 个分区各占一个 .nav-sec
-    await expect(page.locator(".a-side .nav-group")).toHaveCount(4);
-    await expect(page.locator(".a-side nav .nav-sec")).toHaveCount(7);
+    // 组头 3 个（仪表盘/系统配置/模型服务/用户管理/应用管理是顶级项，不画标题）；
+    // 8 个分区各占一个 .nav-sec
+    await expect(page.locator(".a-side .nav-group")).toHaveCount(3);
+    await expect(page.locator(".a-side nav .nav-sec")).toHaveCount(8);
 
     // 层级由「结构」表达，不靠缩小字号：所有行仍是 40px / 13.5px 的同一规格，
     // 组头只多一个 600 字重（+ 折叠箭头），父子关系靠子项缩进与 1px 导轨。
@@ -27,8 +28,9 @@ test.describe("管理台 chrome（桌面）", () => {
       const group = document.querySelector<HTMLElement>(".a-side .nav-group")!;
       // 取**非当前项**做基线：选中态的 600 字重是另一回事，量到它会把断言变成假绿/假红
       const top = document.querySelector<HTMLElement>('.a-side nav a[href="/admin/config"]')!;
-      // 子项取分组内的非当前项：模型服务已是**顶级项**（不再缩进），不能再拿它当"子"样本
-      const child = document.querySelector<HTMLElement>('.a-side .nav-sub a[href="/admin/users"]')!;
+      // 子项取分组内的非当前项：模型服务、用户管理、应用管理都已是**顶级项**（不再缩进），
+      // 不能再拿它们当"子"样本
+      const child = document.querySelector<HTMLElement>('.a-side .nav-sub a[href="/admin/orders"]')!;
       const active = document.querySelector<HTMLElement>(".a-side nav a.active")!;
       const sub = document.querySelector<HTMLElement>(".a-side .nav-sub")!;
       const gs = getComputedStyle(group);
@@ -56,7 +58,7 @@ test.describe("管理台 chrome（桌面）", () => {
         activeBg: getComputedStyle(active).backgroundColor,
       };
     });
-    expect(ui.headerSvgs).toEqual([2, 2, 2, 2]);
+    expect(ui.headerSvgs).toEqual([2, 2, 2]);
     expect(ui.itemSvgCounts.every((n) => n === 1), "菜单项应恒带 1 个图标").toBe(true);
     expect(new Set(ui.rowH), "所有行必须同一行高").toEqual(new Set([40]));
     expect(new Set(ui.rowFont), "所有行必须同一字号").toEqual(new Set(["13.5px"]));
@@ -99,8 +101,9 @@ test.describe("管理台 chrome（桌面）", () => {
     await stubAdminApi(page);
     await page.goto("/admin/dashboard");
 
-    const head = page.getByRole("button", { name: "用户与应用" });
-    const modelLink = page.locator('.a-side nav a[href="/admin/users"]');
+    // 折叠样本换成「交易与资金」：原样本「用户与应用」已拆成两个顶级项（不可折叠）
+    const head = page.getByRole("button", { name: "交易与资金" });
+    const modelLink = page.locator('.a-side nav a[href="/admin/orders"]');
     await expect(head).toHaveAttribute("aria-expanded", "true");
     await expect(modelLink).toBeVisible();
 
@@ -113,24 +116,24 @@ test.describe("管理台 chrome（桌面）", () => {
 
     // 导轨（1px border-left）挂在内容容器上 ⇒ 收起时整块 display:none，
     // 不会在组头下面留下一条没有内容的竖线。
-    expect(await page.locator("#nav-sec-accounts").evaluate((el) => getComputedStyle(el).display)).toBe(
+    expect(await page.locator("#nav-sec-billing").evaluate((el) => getComputedStyle(el).display)).toBe(
       "none",
     );
 
     // 偏好要落盘：刷新后仍收起
     await page.reload();
-    await expect(page.getByRole("button", { name: "用户与应用" })).toHaveAttribute(
+    await expect(page.getByRole("button", { name: "交易与资金" })).toHaveAttribute(
       "aria-expanded",
       "false",
     );
 
     // 书签/直接进该分区内的页面：必须自动展开，否则当前页在菜单里"消失"
-    await page.goto("/admin/users");
-    await expect(page.getByRole("button", { name: "用户与应用" })).toHaveAttribute(
+    await page.goto("/admin/orders");
+    await expect(page.getByRole("button", { name: "交易与资金" })).toHaveAttribute(
       "aria-expanded",
       "true",
     );
-    await expect(page.locator(".a-side nav a.active")).toContainText("用户管理");
+    await expect(page.locator(".a-side nav a.active")).toContainText("订单管理");
 
     // 200px 档（≤1023px）：组头是 <button>，既不撑破侧栏也不塌成文字宽度。
     // 撑破 ⇒ .a-side nav 的 overflow-y:auto 会把 overflow-x 也算 auto，内部冒出横向滚动条；
@@ -308,7 +311,7 @@ test.describe("管理台 chrome（≤767px）", () => {
  * 侧栏底栏的对外文档入口。
  *
  * 它**刻意不在 `<nav>` 里**：管理台导航是「能改数据的页面」，文档站是只读的对外面。
- * 放进 nav 会让 15 项计数、4 个分组与「组头/子项」几何断言全部变动，
+ * 放进 nav 会让 15 项计数、3 个分组与「组头/子项」几何断言全部变动，
  * 也会让人误以为它是又一个后台页 —— 所以这条同时守「入口存在」与「没有进入 nav 计数」。
  */
 test.describe("管理台侧栏 · 底栏入口", () => {

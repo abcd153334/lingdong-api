@@ -26,6 +26,40 @@ describe("Dialog / Sheet", () => {
     expect(onClose).toHaveBeenCalled();
   });
 
+  it("headExtra 落在标题与关闭之间，且不传时顶栏结构不变", () => {
+    const plain = render(
+      <Dialog open onClose={() => {}} title="无附加" closeButton>
+        内容体
+      </Dialog>,
+    );
+    // 旧结构：只有标题 + 关闭，没有附加容器
+    expect(plain.container.querySelector(".dl-head__extra")).toBeNull();
+    expect(
+      Array.from(plain.container.querySelectorAll(".dl-head > *")).map((el) => el.className),
+    ).toEqual(["dl-title", "icon-btn dl-close"]);
+    plain.unmount();
+
+    const withExtra = render(
+      <Dialog
+        open
+        onClose={() => {}}
+        title="带页签"
+        closeButton
+        headExtra={<div role="tablist" aria-label="页签" />}
+      >
+        内容体
+      </Dialog>,
+    );
+    const head = withExtra.container.querySelector(".dl-head") as HTMLElement;
+    // 顺序必须是 标题 → 附加 → 关闭：页签在关闭按钮左边，键盘顺序也才合理
+    expect(Array.from(head.children).map((el) => el.className)).toEqual([
+      "dl-title",
+      "dl-head__extra",
+      "icon-btn dl-close",
+    ]);
+    expect(screen.getByRole("tablist")).toBeInTheDocument();
+  });
+
   it("actions 按顺序渲染为页脚按钮", async () => {
     const onOk = vi.fn();
     const user = userEvent.setup();

@@ -65,3 +65,47 @@ export const queryClient = new QueryClient({
     },
   },
 });
+
+/**
+ * 站点级公开数据：与「当前是谁」无关，切号后继续复用。
+ *
+ * `portal/config` 是站点配置（币种/认证策略），`portal/packages` 是套餐目录，
+ * `pricing` 是公开价目表 —— 三者都不带 uid。
+ *
+ * **不在此列的 portal 键都会被清**，特别是：
+ *   - `portal/defaults`：按当前用户的密钥返回"哪些模型可用"，是账户级；
+ *   - `portal/announcements`：带个人已读标记，是账户级。
+ */
+const ACCOUNT_PUBLIC_KEYS: readonly (readonly unknown[])[] = [
+  ["pricing"],
+  ["portal", "config"],
+  ["portal", "packages"],
+];
+
+/** 只依赖 queryKey 的最小子集：直接当 predicate 传时与 TanStack 的 Query 泛型兼容。 */
+type KeyedQuery = { queryKey: readonly unknown[] };
+
+/** 是否为「账户级」查询（portal/admin 命名空间下，且不在公开白名单里）。 */
+export function isAccountQuery(query: KeyedQuery): boolean {
+  const key = query.queryKey;
+  const head = key?.[0];
+  if (head !== "portal" && head !== "admin") return false;
+  return !ACCOUNT_PUBLIC_KEYS.some((allowed) => allowed.every((part, i) => key[i] === part));
+}
+
+/**
+ * 清掉账户级缓存（会话失效与登录成功时调用）。
+ *
+ * 为什么必须清：queryKey 不含用户维度，`gcTime` 默认 5 分钟。共享终端上
+ * A 掉线后 B 登录，5 分钟内会看到 A 的余额、密钥、订单、被授权的模型。
+ *
+ * 顺序不能反：先 `cancelQueries` 再 `removeQueries`。否则在途请求返回后会
+ * 把数据重新写回缓存，用户仍能看到上一个账号的内容。
+ *
+ * 用 predicate 而不是 `queryClient.clear()`：后者会连公开价目表一起删，
+ * 引发一轮无意义的公开数据重取。
+ */
+export function clearAccountQueries(): void {
+  void queryClient.cancelQueries({ predicate: isAccountQuery });
+  queryClient.removeQueries({ predicate: isAccountQuery });
+}

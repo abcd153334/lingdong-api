@@ -18,6 +18,10 @@ func TruncateRunes(s string, n int) string {
 	if n <= 0 || s == "" {
 		return ""
 	}
+	// 先修非法 UTF-8：下面的「未超限直接返回」会把原文原样放行，
+	// 而非法字节一旦写进 PG 的 text/varchar 列就会报 22021，
+	// 连带整个结算/释放事务回滚。合法串走原路，不额外分配。
+	s = validUTF8(s)
 	if utf8.RuneCountInString(s) <= n {
 		return s
 	}
@@ -29,6 +33,7 @@ func TruncateRunesEllipsis(s string, n int) string {
 	if n <= 0 || s == "" {
 		return ""
 	}
+	s = validUTF8(s)
 	if utf8.RuneCountInString(s) <= n {
 		return s
 	}
@@ -36,6 +41,16 @@ func TruncateRunesEllipsis(s string, n int) string {
 		return "…"
 	}
 	return string([]rune(s)[:n-1]) + "…"
+}
+
+// validUTF8 把非法字节替换为 U+FFFD。
+//
+// 只在确有非法字节时才做转换：合法串（绝大多数）走原路，不额外分配。
+func validUTF8(s string) string {
+	if utf8.ValidString(s) {
+		return s
+	}
+	return strings.ToValidUTF8(s, "\uFFFD")
 }
 
 // Snippet 把上游响应体转为可落库的错误摘要：先按字符截断，再压平换行与多余空白。

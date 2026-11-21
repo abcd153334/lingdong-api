@@ -13,6 +13,7 @@ package relay
 
 import (
 	"regexp"
+	"sort"
 	"strings"
 
 	"lingdong-api/internal/model"
@@ -44,7 +45,23 @@ var (
 	// 恰好含 `sk-xxxx` 的片段会被打码，属可接受的可读性损失。
 	reRedactPrefix = regexp.MustCompile(`(?:sk|ak|rk|pk|ld)-[A-Za-z0-9_\-]{6,}`)
 	// 查询串 / 表单项里的密钥。
-	reRedactQuery = regexp.MustCompile(`(?i)([?&](?:api[_-]?key|key|token|access_token|secret|signature)=)[^&\s"']+`)
+	//
+	// 键名清单**不在本文件维护**：唯一真相是 textx.SensitiveQueryKeys（访问日志、
+	// netguard 抓包、上游脱敏共用一份）。曾经这里与 textx 各写一份且互相缺项
+	// （这里缺 password/sig/sign/apikey，textx 缺 api[_-]?key），于是同一个请求
+	// "有没有被脱敏"取决于它走的是日志还是上游报文 —— 后者会写进
+	// usages.error_msg，门户用户与 CSV 导出都看得到。
+	//
+	// 按长度降序拼装：`signature` 必须早于 `sig`/`sign` 命中，否则
+	// `?signature=xxx` 会被截成 `signature=`+`ature=xxx` 的错位匹配。
+	reRedactQuery = func() *regexp.Regexp {
+		keys := append([]string(nil), textx.SensitiveQueryKeys...)
+		sort.Slice(keys, func(i, j int) bool { return len(keys[i]) > len(keys[j]) })
+		for i := range keys {
+			keys[i] = regexp.QuoteMeta(keys[i])
+		}
+		return regexp.MustCompile(`(?i)([?&](?:` + strings.Join(keys, "|") + `)=)[^&\s"']+`)
+	}()
 )
 
 // redactUpstream 抹掉上游文案里的密钥与渠道主机名。

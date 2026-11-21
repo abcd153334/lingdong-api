@@ -125,7 +125,14 @@ func NewRecordKey() string { return ulid.New() }
 // 三件事一起做是刻意的：分成三遍就会出现"校验通过但存了未声明字段"
 // 或"存了空串但读出来当成有值"。pathPrefix 让同一套逻辑既能校验记录（data.）
 // 也能校验插件配置（config.）。
-func normalizeFields(fields []Field, raw map[string]any, pathPrefix string) (map[string]any, []Problem) {
+// normalizeFields 归一 + 校验。
+//
+// requireAll 决定"缺失的必填项"是否报错：
+//   - 记录写入、安装配置：true（缺必填就是错的）；
+//   - 已启用安装的**局部**配置保存：false。否则升级新增一个必填键后，
+//     "改对外只读开关"也会 422 —— 而缺的那项要等运维补，用户只是点了个开关。
+//     这种局部保存里"必填不能被清空"由调用方按"本次是否显式传了该键"判断。
+func normalizeFields(fields []Field, raw map[string]any, pathPrefix string, requireAll bool) (map[string]any, []Problem) {
 	var ps []Problem
 	out := make(map[string]any, len(fields))
 	declared := make(map[string]bool, len(fields))
@@ -146,7 +153,7 @@ func normalizeFields(fields []Field, raw map[string]any, pathPrefix string) (map
 			continue
 		}
 		if norm == nil {
-			if f.Required {
+			if requireAll && f.Required {
 				ps = append(ps, problem(pathPrefix+f.Key, "必填"))
 			}
 			continue
@@ -195,6 +202,14 @@ func normalizeField(f *Field, v any, present bool) (any, string) {
 		n, ok := asInt(v)
 		if !ok {
 			return nil, "需要整数"
+		}
+		// min/max 在写入侧强制：只在界面上标"1-100"而服务端不拦，等于给了一个
+		// 靠自觉遵守的约定（脚本 PUT 一样写进越界值，之后所有统计都失真）。
+		if f.Min != nil && n < *f.Min {
+			return nil, fmt.Sprintf("不能小于 %d", *f.Min)
+		}
+		if f.Max != nil && n > *f.Max {
+			return nil, fmt.Sprintf("不能大于 %d", *f.Max)
 		}
 		return n, ""
 	case TypeBool:

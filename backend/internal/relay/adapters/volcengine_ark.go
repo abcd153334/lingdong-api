@@ -4,9 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"net"
 	"net/http"
-	"os"
 	"time"
 
 	"lingdong-api/internal/relay"
@@ -127,17 +125,11 @@ func arkImageCfg(cfg *relay.ChannelConfig) *relay.ChannelConfig {
 
 // arkIsTimeout 判断错误是否为「等超时了」（而不是上游明确拒绝）。
 //
-// 三种来源都要覆盖：context 截止、os.ErrDeadlineExceeded（net 包的包装）、
-// 以及 net.Error.Timeout()（SDK/HTTP 传输层自己判定的超时）。
+// 判据不在这里维护：relay.IsTimeoutError 是唯一实现（网关侧要用同一套判据把
+// 图片超时包成 ImageGenTimeoutError）。两处各写一份的后果是「一边判超时、
+// 一边判上游故障」，同一次慢请求在一处返回 409、在另一处触发换渠道重跑。
 func arkIsTimeout(err error) bool {
-	if err == nil {
-		return false
-	}
-	if errors.Is(err, context.DeadlineExceeded) || errors.Is(err, os.ErrDeadlineExceeded) {
-		return true
-	}
-	var ne net.Error
-	return errors.As(err, &ne) && ne.Timeout()
+	return relay.IsTimeoutError(err)
 }
 
 // Test 探测渠道连通性（鉴权 + 可达性）。

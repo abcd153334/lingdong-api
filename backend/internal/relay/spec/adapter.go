@@ -17,6 +17,7 @@ import (
 
 	"lingdong-api/internal/apidoc"
 	"lingdong-api/internal/pkg/taskstate"
+	"lingdong-api/internal/pkg/textx"
 	"lingdong-api/internal/relay"
 )
 
@@ -680,12 +681,9 @@ func (a *Adapter) doJSON(ctx context.Context, cfg *relay.ChannelConfig, ep Endpo
 		return nil, err
 	}
 	defer resp.Body.Close()
-	raw, err := io.ReadAll(io.LimitReader(resp.Body, relay.MaxUpstreamBodyBytes+1))
+	raw, err := relay.ReadUpstreamBody(resp.Body, relay.MaxUpstreamBodyBytes)
 	if err != nil {
 		return nil, err
-	}
-	if len(raw) > relay.MaxUpstreamBodyBytes {
-		return nil, relay.ErrUpstreamBodyTooLarge
 	}
 	if err := a.checkSuccess(cfg, ep, resp.StatusCode, raw); err != nil {
 		return nil, err
@@ -796,18 +794,18 @@ func (a *Adapter) doRaw(ctx context.Context, cfg *relay.ChannelConfig, ep Endpoi
 		return nil, err
 	}
 	defer resp.Body.Close()
-	// 二进制端点的产物上限单独一套：音频比 JSON 大一个数量级，
-	// 按 8 MiB 读会把长文本朗读判成"上游体过大"（用户看到 502，实际只是音频长了）。
-	limit := int64(relay.MaxUpstreamBodyBytes)
+	// 上限按端点族取：
+	//   - 二进制产物（音频/文件）：32 MiB —— 按 8 MiB 读会把长文本朗读判成
+	//     "上游体过大"（用户看到 502，实际只是音频长了）；
+	//   - 图片 JSON（b64_json，4/3 放大）：64 MiB，见 relay.BodyCapFor；
+	//   - 其余 JSON：8 MiB（bridge_test 锁住这条）。
+	limit := relay.BodyCapFor(key)
 	if ep.Binary {
 		limit = BridgeMaxArtifactBytes
 	}
-	raw, err := io.ReadAll(io.LimitReader(resp.Body, limit+1))
+	raw, err := relay.ReadUpstreamBody(resp.Body, limit)
 	if err != nil {
 		return nil, err
-	}
-	if int64(len(raw)) > limit {
-		return nil, relay.ErrUpstreamBodyTooLarge
 	}
 	if err := a.checkSuccess(cfg, ep, resp.StatusCode, raw); err != nil {
 		return nil, err
@@ -911,25 +909,28 @@ func (e *upstreamError) Error() string {
 	return fmt.Sprintf("上游返回失败（HTTP %d）：%s", e.status, e.msg)
 }
 
+// maxMessageRunes 是上游错误摘要的最大**字符**数（不是字节）。
+//
+// 落库列 usages.error_msg 是 varchar(500)（PG 按字符计数），300 个字符留足余量。
+const maxMessageRunes = 300
+
+// extractMessage 从上游响应体里取一段可展示的原因。
+//
+// 截断必须走 textx（按 rune）：这里曾经是 `s[:n]+"…"` 按**字节**切，
+// 一旦切在多字节字符中间就产出非法 UTF-8，PG 写入报 22021，
+// 整个结算/释放事务回滚 —— 结果是冻结永久滞留（textx 的文件头记录过同类事故）。
 func extractMessage(body []byte, path string) string {
 	if path == "" {
-		return truncate(strings.TrimSpace(string(body)), 300)
+		return textx.TruncateRunesEllipsis(strings.TrimSpace(string(body)), maxMessageRunes)
 	}
 	var parsed any
 	if err := json.Unmarshal(body, &parsed); err != nil {
-		return truncate(strings.TrimSpace(string(body)), 300)
+		return textx.TruncateRunesEllipsis(strings.TrimSpace(string(body)), maxMessageRunes)
 	}
 	if v := firstString(parsed, path); v != "" {
-		return truncate(v, 300)
+		return textx.TruncateRunesEllipsis(v, maxMessageRunes)
 	}
-	return truncate(strings.TrimSpace(string(body)), 300)
-}
-
-func truncate(s string, n int) string {
-	if len(s) <= n {
-		return s
-	}
-	return s[:n] + "…"
+	return textx.TruncateRunesEllipsis(strings.TrimSpace(string(body)), maxMessageRunes)
 }
 
 /* ------------------------------- 请求体重建 ------------------------------- */

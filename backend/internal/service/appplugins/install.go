@@ -3,6 +3,7 @@ package appplugins
 import (
 	"context"
 	"encoding/json"
+	"sort"
 
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
@@ -47,6 +48,11 @@ type Detail struct {
 	Drift           *Drift      `json:"drift"`
 	RecordCount     int64       `json:"record_count"`
 	CatalogDisabled bool        `json:"catalog_disabled"`
+	// ConfigMissing 是"当前 manifest 声明为必填、但这条安装里没有值"的键。
+	//
+	// 为什么需要：升级新增一个必填配置后，已启用的安装会处于"启用着但配置不全"的状态。
+	// 不给读者看的话，管理员只能从"保存成功但行为不对"里倒推，而"缺哪一项"无从下手。
+	ConfigMissing []string `json:"config_missing"`
 }
 
 // Install 把目录里的插件装到某个应用上。
@@ -61,7 +67,7 @@ func Install(ctx context.Context, gdb *gorm.DB, appID uint64, key string, cfgRaw
 	if cat.Status != model.AppPluginStatusEnabled {
 		return nil, ErrDisabled
 	}
-	cfg, ps := normalizeFields(m.Config, cfgRaw, "config.")
+	cfg, ps := normalizeFields(m.Config, cfgRaw, "config.", true)
 	if len(ps) > 0 {
 		return nil, &InvalidError{Problems: ps}
 	}
@@ -95,8 +101,11 @@ type PatchInput struct {
 
 // Patch 改配置或启停。配置是**部分键集**覆盖（同 systemconfig 的分页签保存）：
 // 只覆盖传入的键，未传的保持原值，避免"改一个键把其它键清空"。
-func Patch(ctx context.Context, gdb *gorm.DB, appID uint64, key string, in PatchInput) (*model.AppPluginInstall, error) {
+// 返回值 dropped 是"存量里有、当前 manifest 已不承认"的配置键（已被裁剪掉）。
+// 调用方要把它写进审计：清理是正确行为，但必须留痕，否则"我的配置怎么没了"无据可查。
+func Patch(ctx context.Context, gdb *gorm.DB, appID uint64, key string, in PatchInput) (*model.AppPluginInstall, []string, error) {
 	var out model.AppPluginInstall
+	var dropped []string
 	err := gdb.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		inst, err := lockInstall(tx, appID, key)
 		if err != nil {
@@ -124,10 +133,20 @@ func Patch(ctx context.Context, gdb *gorm.DB, appID uint64, key string, in Patch
 			}
 		}
 
+		// 存量配置先按**当前** manifest 裁剪：升级删掉一个配置键后，库里那份 map
+		// 仍然带着旧键，直接喂给 normalizeFields 会对每个旧键报"没有这个字段" ——
+		// 表现为"这个插件的任何保存都 422，连关掉对外只读都不行"。
 		cfg := map[string]any{}
 		if len(inst.Config) > 0 {
 			if decoded, err := DecodeObject(json.RawMessage(inst.Config)); err == nil {
-				cfg = decoded
+				for k, v := range decoded {
+					if _, ok := m.ConfigField(k); ok {
+						cfg[k] = v
+					} else {
+						dropped = append(dropped, k)
+					}
+				}
+				sort.Strings(dropped)
 			}
 		}
 		if in.Config != nil {
@@ -135,16 +154,28 @@ func Patch(ctx context.Context, gdb *gorm.DB, appID uint64, key string, in Patch
 				cfg[k] = v
 			}
 		}
-		clean, ps := normalizeFields(m.Config, cfg, "config.")
+		// 必填口径三条（缺一条都会把正常操作堵死）：
+		//  1. 从非启用转启用：全量校验（"启用着但缺必填"是造出来的中间态）；
+		//  2. 保持启用：只拒绝"本次显式传空"的必填项 —— 否则升级新增一个必填键后，
+		//     连改对外只读开关都 422（用户只是点了个开关，缺的那项要等运维补）；
+		//  3. 停用/卸载态：不校验（允许先存半截配置，启用时再拦）。
+		enabling := nextStatus == model.AppPluginInstallEnabled && inst.Status != model.AppPluginInstallEnabled
+		clean, ps := normalizeFields(m.Config, cfg, "config.", enabling)
 		if len(ps) > 0 {
 			return &InvalidError{Problems: ps}
 		}
-		// 启用态必须有完整合法配置：允许"先存半截配置、再启用"会造出
-		// "启用着但缺必填项"的中间态，而使用方拿不到解释。
-		if nextStatus == model.AppPluginInstallEnabled && len(ps) == 0 {
+		if nextStatus == model.AppPluginInstallEnabled {
 			for i := range m.Config {
 				f := &m.Config[i]
-				if f.Required && clean[f.Key] == nil {
+				if !f.Required || clean[f.Key] != nil {
+					continue
+				}
+				if in.Config != nil {
+					if _, touched := (*in.Config)[f.Key]; touched {
+						return &InvalidError{Problems: []Problem{problem("config."+f.Key, "必填项不能清空")}}
+					}
+				}
+				if enabling {
 					return &InvalidError{Problems: []Problem{problem("config."+f.Key, "启用前必须填写")}}
 				}
 			}
@@ -172,9 +203,9 @@ func Patch(ctx context.Context, gdb *gorm.DB, appID uint64, key string, in Patch
 		return tx.Where("id = ?", inst.ID).Limit(1).Find(&out).Error
 	})
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	return &out, nil
+	return &out, dropped, nil
 }
 
 // Uninstall 只把状态置为"已卸载"，不删配置、不删记录。
@@ -256,6 +287,18 @@ func GetDetail(ctx context.Context, gdb *gorm.DB, appID uint64, key string) (*De
 	}
 	if d.Install.Config == nil {
 		d.Install.Config = map[string]any{}
+	}
+	// 必填但没值：升级新增必填项后，已启用的安装会停在这个状态。
+	// 恒为数组（空也是 []），前端直接 .length。
+	d.ConfigMissing = make([]string, 0, len(m.Config))
+	for i := range m.Config {
+		f := &m.Config[i]
+		if !f.Required {
+			continue
+		}
+		if v, ok := d.Install.Config[f.Key]; !ok || v == nil {
+			d.ConfigMissing = append(d.ConfigMissing, f.Key)
+		}
 	}
 	if inst.PluginVersion != "" && inst.PluginVersion != cat.Version {
 		d.Drift = &Drift{Installed: inst.PluginVersion, Current: cat.Version}

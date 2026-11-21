@@ -840,7 +840,7 @@ func (AutoDL) SubmitTask(ctx context.Context, cfg *relay.ChannelConfig, req *rel
 		return "", fmt.Errorf("上游请求失败：%w", err)
 	}
 	defer resp.Body.Close()
-	buf, err := io.ReadAll(io.LimitReader(resp.Body, maxUpstreamBodyBytes))
+	buf, err := readUpstreamBody(resp.Body, maxUpstreamBodyBytes)
 	if err != nil {
 		return "", fmt.Errorf("读取上游响应失败：%w", err)
 	}
@@ -905,7 +905,7 @@ func (AutoDL) PollTask(ctx context.Context, cfg *relay.ChannelConfig, upstreamTa
 		return nil, fmt.Errorf("上游请求失败：%w", err)
 	}
 	defer resp.Body.Close()
-	buf, err := io.ReadAll(io.LimitReader(resp.Body, maxUpstreamBodyBytes))
+	buf, err := readUpstreamBody(resp.Body, maxUpstreamBodyBytes)
 	if err != nil {
 		return nil, fmt.Errorf("读取上游响应失败：%w", err)
 	}

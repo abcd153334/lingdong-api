@@ -27,6 +27,7 @@ func TestAppPluginRoutesRegistered(t *testing.T) {
 	for _, want := range []string{
 		"GET /api/admin/app-plugins",
 		"GET /api/admin/app-plugins/sample",
+		"GET /api/admin/app-plugins/dev-doc.md",
 		"GET /api/admin/app-plugins/:key",
 		"PUT /api/admin/app-plugins/:key",
 		"PATCH /api/admin/app-plugins/:key/status",
@@ -45,6 +46,8 @@ func TestAppPluginRoutesRegistered(t *testing.T) {
 		"GET /api/admin/apps/:id/plugins/:key/records/export",
 		"PUT /api/admin/apps/:id/plugins/:key/records/:rk",
 		"DELETE /api/admin/apps/:id/plugins/:key/records/:rk",
+		// 批量删除：POST + body（DELETE 带 body 会被部分代理/客户端丢掉）
+		"POST /api/admin/apps/:id/plugins/:key/records/batch-delete",
 	} {
 		if !live[want] {
 			t.Fatalf("缺少管理端路由 %s", want)

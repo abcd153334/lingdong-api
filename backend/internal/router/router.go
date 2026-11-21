@@ -672,6 +672,10 @@ func New() *gin.Engine {
 	// 接入应用（对外 API 的归属主体）。没有删除端点：应用被密钥与订单引用，
 	// 下线用 PATCH status=2（只拦新签发，已签发密钥仍可用）。
 	admin.GET("/apps", controller.AdminAppList)
+	// 应用选择器的轻量选项（只回 id/slug/name/status，不跑卡片那套聚合）。
+	// 静态段与 /apps/:id/* 同级是受支持的（gin 把静态子节点插在通配符之前），
+	// 但顺序写坏会让 /apps/:id/* 静默 404，故 router 包有真的发请求的回归用例。
+	admin.GET("/apps/options", controller.AdminAppOptions)
 	admin.POST("/apps", controller.AdminAppCreate)
 	admin.PUT("/apps/:id", controller.AdminAppUpdate)
 	admin.PATCH("/apps/:id/status", controller.AdminAppStatus)
@@ -708,6 +712,9 @@ func New() *gin.Engine {
 	// 静态段 /sample 必须写在 /:key 之前（gin 同层静态优先，这里仍按可读顺序摆）。
 	admin.GET("/app-plugins", controller.AdminAppPluginList)
 	admin.GET("/app-plugins/sample", controller.AdminAppPluginSample)
+	// 开发手册：由后端从类型矩阵/上限/错误码**生成**（见 devdoc 包）。
+	// 静态段写在 /:key 之前，与 /sample 同一条理由（同层静态优先，读起来也顺）。
+	admin.GET("/app-plugins/dev-doc.md", controller.AdminAppPluginDevDoc)
 	admin.GET("/app-plugins/:key", controller.AdminAppPluginGet)
 	admin.PUT("/app-plugins/:key", controller.AdminAppPluginImport)
 	admin.PATCH("/app-plugins/:key/status", controller.AdminAppPluginStatus)
@@ -727,6 +734,8 @@ func New() *gin.Engine {
 	admin.GET("/apps/:id/plugins/:key/records/export", controller.AdminAppPluginRecordExport)
 	admin.PUT("/apps/:id/plugins/:key/records/:rk", controller.AdminAppPluginRecordUpdate)
 	admin.DELETE("/apps/:id/plugins/:key/records/:rk", controller.AdminAppPluginRecordDelete)
+	// 批量删除：POST 而不是 DELETE + body（后者在部分代理/客户端上会被丢掉 body）。
+	admin.POST("/apps/:id/plugins/:key/records/batch-delete", controller.AdminAppPluginRecordBatchDelete)
 
 	// 开放接口手册（只读）。**不放公开文档站**：它有应用清单与权限模型的完整语义，
 	// 而接入方是平台逐个拉进来的应用，不是任意访客。

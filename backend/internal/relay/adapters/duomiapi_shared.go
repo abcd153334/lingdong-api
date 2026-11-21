@@ -305,7 +305,7 @@ func duomiDoRaw(ctx context.Context, cfg *relay.ChannelConfig, authPrefix, metho
 		return nil, nil, fmt.Errorf("上游请求失败：%w", err)
 	}
 	defer resp.Body.Close()
-	buf, err := io.ReadAll(io.LimitReader(resp.Body, maxUpstreamBodyBytes))
+	buf, err := readUpstreamBody(resp.Body, maxUpstreamBodyBytes)
 	if err != nil {
 		return resp, nil, fmt.Errorf("读取上游响应失败：%w", err)
 	}
@@ -348,7 +348,7 @@ func duomiDoMultipart(ctx context.Context, cfg *relay.ChannelConfig, authPrefix,
 		return nil, fmt.Errorf("上游请求失败：%w", err)
 	}
 	defer resp.Body.Close()
-	body, rerr := io.ReadAll(io.LimitReader(resp.Body, maxUpstreamBodyBytes))
+	body, rerr := readUpstreamBody(resp.Body, maxUpstreamBodyBytes)
 	if rerr != nil {
 		return nil, fmt.Errorf("读取上游响应失败：%w", rerr)
 	}

@@ -7,6 +7,7 @@ import (
 	"go.uber.org/zap"
 
 	"lingdong-api/internal/pkg/logger"
+	"lingdong-api/internal/pkg/metrics"
 	"lingdong-api/internal/service/reconcile"
 )
 
@@ -104,6 +105,15 @@ func (*ReconcileJob) Run(ctx context.Context) error {
 		zap.Int64("affiliate_cooling_total", rep.Affiliate.CoolingTotal),
 		// 分段执行状态
 		zap.Strings("segments_incomplete", rep.Errors),
+	}
+
+	// 指标**无条件**先写：差异归零时也必须覆盖，否则告警看板上留着上一次的旧值
+	// （"今天修好了"与"今天没跑"看起来一样）。
+	metrics.Set(metrics.NameBillingReconcileFundDiff, float64(fundDiff))
+	metrics.Set(metrics.NameBillingReconcileWatchDiff, float64(watchDiff))
+	if len(rep.Errors) == 0 {
+		// 只有完整跑完才推进时间戳：分段失败时推它等于宣布"这次对账可信"。
+		metrics.Set(metrics.NameBillingReconcileTimestamp, float64(time.Now().Unix()))
 	}
 
 	if fundDiff > 0 {

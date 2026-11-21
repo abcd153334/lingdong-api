@@ -323,9 +323,11 @@ test.describe("M6 栅格契约：display:grid 且列数随断点收敛", () => {
 });
 
 /**
- * M8 覆盖的页面集合（门户 7 + 管理台 10 + 公开静态 2 = 19）。
+ * M8 覆盖的页面集合（门户 7 + 管理台 9 + 公开静态 2 = 18）。
  *
  * 管理台从 11 降到 9：模型管理 / 渠道管理 / 适配器三条路径合并成一个「模型服务」。
+ * 插件数据页不再是独立路由（在应用管理弹窗的页签里），它的 id 唯一性由
+ * `admin-apps-plugins.spec.ts` 的「两个插件页签同时保活」用例守。
  * 公告两端都是顶栏弹层，不是页面。
  */
 const ID_PATHS = [
@@ -345,14 +347,12 @@ const ID_PATHS = [
   "/admin/tasks",
   "/admin/config",
   "/admin/audit",
-  // 插件页（泛化路由）：运行期才知道的数据对象，最容易出现"只有它有重复 id"
-  "/admin/apps/2/p/ticket",
   "/about",
   "/agreement",
 ];
 
 test.describe("M8 同页无重复 id / 可访问名单命中", () => {
-  test("19 个业务页 DOM 内 id 唯一", async ({ page }) => {
+  test("18 个业务页 DOM 内 id 唯一", async ({ page }) => {
     test.setTimeout(120_000);
     await stubApi(page);
     await seedAuth(page, { role: 0 });

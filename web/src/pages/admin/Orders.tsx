@@ -11,16 +11,18 @@ import { PageHead } from "@/components/common/PageHead";
 import { StatusTag } from "@/components/common/StatusTag";
 import {
   exportAdminOrders,
+  useAdminAppOptionsQuery,
   useAdminOrderManualCreditMutation,
   useAdminOrderRefundConfirmMutation,
   useAdminOrderRefundMutation,
   useAdminOrdersQuery,
 } from "@/lib/api";
 import { ApiError, DEFAULT_PAGE_SIZE } from "@/lib/apiClient";
+import { appFilterField, appIdParam } from "@/lib/appFilter";
 import { formatCent, formatDateTime } from "@/lib/format";
 import { orderColumns } from "@/lib/table";
 import { moneyAt } from "@/lib/money";
-import type { AdminOrderItem } from "@/types";
+import type { AdminAppOption, AdminOrderItem } from "@/types";
 
 const ORDER_STATUS_ITEMS: [string, string][] = [
   ["pending", "待支付"],
@@ -31,10 +33,13 @@ const ORDER_STATUS_ITEMS: [string, string][] = [
   ["need_manual", "人工处理"],
 ];
 
-const EMPTY_FILTERS: Record<string, string> = { fStatus: "", fChannel: "" };
+const EMPTY_FILTERS: Record<string, string> = { fStatus: "", fChannel: "", fApp: "" };
 
-/** 筛选字段：状态 / 渠道（对齐 admin-orders.html）；渠道选项与门户收银台同源 */
-const filterFields = (payItems: [string, string][]): FilterField[] => [
+/** 筛选字段：应用 / 状态 / 渠道；渠道选项与门户收银台同源 */
+const filterFields = (payItems: [string, string][], appItems: AdminAppOption[]): FilterField[] => [
+  // 应用在最前：它是最粗的那一刀（"某应用这段时间充了多少"），
+  // 也是唯一与订单归属直接对应的维度。
+  appFilterField(appItems),
   { t: "select", id: "fStatus", label: "状态", allLabel: "全部状态", items: ORDER_STATUS_ITEMS },
   { t: "select", id: "fChannel", label: "渠道", allLabel: "全部渠道", items: payItems },
 ];
@@ -67,12 +72,16 @@ export function AdminOrdersPage() {
   /** 上游核实凭证：确认「退款失败」会无条件回滚额度，后端强制要求留凭证。 */
   const [evidence, setEvidence] = useState("");
 
+  // 应用选项（/admin/apps/options，四个列表页共用一份缓存）。
+  const appOpts = useAdminAppOptionsQuery();
   const query = useAdminOrdersQuery({
     page,
     page_size: DEFAULT_PAGE_SIZE,
     status: filters.fStatus || undefined,
     // 按稳定渠道 ID 筛选：渠道改名不会影响历史订单的归属。
     pay_channel_id: filters.fChannel || undefined,
+    // 应用：0 = 平台直连，必须原样下发（被当成空值吞掉就等于没筛）。
+    app_id: appIdParam(filters.fApp),
   });
   const orders = query.data?.items ?? [];
   const total = query.data?.total ?? 0;
@@ -213,6 +222,8 @@ export function AdminOrdersPage() {
       await exportAdminOrders({
         status: filters.fStatus || undefined,
         pay_channel_id: filters.fChannel || undefined,
+        // 导出必须与列表同源：少带一个筛选，导出的就是"另一个结果集"。
+        app_id: appIdParam(filters.fApp),
       });
       toast.success("已开始下载 CSV");
     } catch (e) {
@@ -230,6 +241,14 @@ export function AdminOrdersPage() {
         ),
         // 套餐名（实时）：自定义金额/续付订单为空 → 显示「—」，不占宽
         packageName: (row) => <span className="small muted">{row.package_name || "—"}</span>,
+        // 应用列：0 = 平台直连（门户/开放 API 用户自充），必须显式区分，
+        // 否则"某应用营收"会把平台直连算进来。
+        app: (row) =>
+          row.app_id === 0 ? (
+            <span className="small muted">平台直连</span>
+          ) : (
+            <span className="small">{row.app_name || "—"}</span>
+          ),
         payChannel: (row) => <span className="small muted">{row.pay_channel || "—"}</span>,
         // 到账金额是下单时固化的绝对值，调价不会改历史订单 ——
         // 因此这里不再有「刻度/倍率差异」标记：金额列与到账列本身就是真相。
@@ -271,7 +290,7 @@ export function AdminOrdersPage() {
       />
 
       <FilterBar
-        fields={filterFields(payItems)}
+        fields={filterFields(payItems, appOpts.items)}
         value={filters}
         onChange={onFilterChange}
         onReset={onFilterReset}

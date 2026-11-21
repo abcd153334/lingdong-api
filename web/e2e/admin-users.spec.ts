@@ -241,3 +241,35 @@ test.describe("S17 用户管理 · 详情抽屉与调账入口", () => {
     expect(adjustBodies[0]).toEqual({ amount: 1_000_000_000_000, reason: "内测补偿" });
   });
 });
+
+const APP_OPTIONS_USERS = [
+  { id: 5, slug: "web-portal", name: "web-portal", display_name: "官网门户", status: 1 },
+  { id: 9, slug: "shadow", name: "影画", display_name: "", status: 2 },
+];
+
+test.describe("S17 用户管理 · 按应用筛选（只筛不加列）", () => {
+  test("选应用后请求带 app_id；表头不出现「应用」列", async ({ page }) => {
+    await seedAdmin(page);
+    await stubAdminUsers(page);
+    await page.route("**/api/admin/apps/options**", (route) =>
+      route.fulfill({ json: envelope({ items: APP_OPTIONS_USERS, truncated: false }) }),
+    );
+    const seen: string[] = [];
+    // 只拦带查询串的列表：/keys、/transactions 仍走上面的桩
+    await page.route("**/api/admin/users?**", (route) => {
+      seen.push(route.request().url());
+      return route.fulfill({
+        json: envelope({ items: USERS, total: USERS.length, page: 1, page_size: 20 }),
+      });
+    });
+
+    await page.goto("/admin/users");
+    // 用户池是全局的：不显示「所属应用」列（一个用户可同时在多个应用下持有密钥）
+    await expect(page.locator(".tbl thead")).not.toContainText("应用");
+
+    await page.getByRole("combobox", { name: "应用" }).click();
+    await page.getByRole("option", { name: /官网门户/ }).click();
+
+    await expect.poll(() => seen.some((u) => u.includes("app_id=5"))).toBe(true);
+  });
+});

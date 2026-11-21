@@ -154,6 +154,16 @@ async function stub(page: Page, opts?: { detail?: (id: number) => unknown }): Pr
           json: envelope({ items: LOG_ITEMS, total: 2, page: 1, page_size: 20 }),
         });
       }
+      if (u.pathname === "/api/admin/apps/options") {
+        return route.fulfill({
+          json: envelope({
+            items: [
+              { id: 5, slug: "web-portal", name: "web-portal", display_name: "官网门户", status: 1 },
+            ],
+            truncated: false,
+          }),
+        });
+      }
       if (u.pathname === "/api/admin/logs/analytics") {
         return route.fulfill({ json: envelope(LOG_ANALYTICS) });
       }
@@ -341,5 +351,28 @@ test.describe("S11 审计日志 · 管理台", () => {
     await row.locator("summary").click();
     await expect(row.locator(".json-view")).toBeVisible();
     await expect(row.locator(".json-view")).toContainText('"status": 1');
+  });
+});
+
+test.describe("调用日志 · 按应用筛选", () => {
+  test("应用筛选同时进入列表与图表请求（不能只筛列表）", async ({ page }) => {
+    await seedAuth(page, { role: 0 });
+    const calls = await stub(page);
+    await page.goto("/admin/logs");
+    await expect(page.locator(".tbl thead")).toContainText("应用");
+
+    await page.getByRole("combobox", { name: "应用" }).click();
+    await page.getByRole("option", { name: /官网门户/ }).click();
+
+    // 列表与 analytics 是**两条**请求：只改 where() 不改 AnalyticsData 时，
+    // 图表会停在"全站口径"而列表已经收敛 —— 这个用例就是那条防线的端到端版本。
+    await expect
+      .poll(() => calls.some((c) => c.startsWith("GET /api/admin/logs?") && c.includes("app_id=5")))
+      .toBe(true);
+    await expect
+      .poll(() =>
+        calls.some((c) => c.startsWith("GET /api/admin/logs/analytics") && c.includes("app_id=5")),
+      )
+      .toBe(true);
   });
 });

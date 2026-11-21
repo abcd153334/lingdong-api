@@ -4,11 +4,9 @@ import (
 	"fmt"
 	"time"
 
-	"go.uber.org/zap"
 	"gorm.io/gorm"
 
 	"lingdong-api/internal/model"
-	"lingdong-api/internal/pkg/logger"
 )
 
 // M64：同步链路的幂等键（usages.idem_key / idem_scope + 部分唯一索引）。
@@ -57,11 +55,3 @@ func MigrateUsagesIdemKey(gdb *gorm.DB) error {
 	return nil
 }
 
-// LogUsagesIdemKey 打一条日志（DDL 幂等，所以每次启动都会跑，只在首次有意义）。
-func LogUsagesIdemKey(applied bool) {
-	if !applied {
-		return
-	}
-	logger.L().Warn("usages 已具备同步幂等键（M64：idem_key / idem_scope + 部分唯一索引）",
-		zap.String("at", time.Now().Format(time.RFC3339)))
-}

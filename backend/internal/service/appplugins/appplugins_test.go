@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"net/url"
 	"os"
 	"strconv"
 	"strings"
@@ -14,6 +15,7 @@ import (
 	gormlogger "gorm.io/gorm/logger"
 
 	"lingdong-api/internal/model"
+	"lingdong-api/internal/pkg/pagination"
 )
 
 // 数据库集成用例：缺 LD_TEST_DSN 就 skip。注意 skip 不等于通过 ——
@@ -112,6 +114,31 @@ func importOK(t *testing.T, gdb *gorm.DB, raw string, expected int, force bool) 
 		t.Fatalf("导入应落库，实际 %+v", res)
 	}
 	return res
+}
+
+// listRecords 是测试的薄封装：老口径 (keyword, offset, limit) → (Params, url.Values)。
+// 现有用例只用 offset=0，所以按 limit 换算成第 1 页即可。
+func listRecords(gdb *gorm.DB, appID uint64, key, entity, keyword string, offset, limit int) ([]RecordItem, int64, error) {
+	q := url.Values{}
+	if keyword != "" {
+		q.Set("keyword", keyword)
+	}
+	page := 1
+	if limit > 0 {
+		page = offset/limit + 1
+	}
+	return ListRecords(context.Background(), gdb, appID, key, entity,
+		pagination.Params{Page: page, PageSize: limit}, q)
+}
+
+// exportPlan 同上：导出只关心"同一组筛选下的总数"。
+func exportPlan(gdb *gorm.DB, appID uint64, key, entity, keyword string) (*Entity, ListQuery, int64, error) {
+	q := url.Values{}
+	if keyword != "" {
+		q.Set("keyword", keyword)
+	}
+	return ExportPlan(context.Background(), gdb, appID, key, entity,
+		pagination.Params{Page: 1, PageSize: pagination.DefaultPageSize}, q)
 }
 
 // TestImportCAS 两个 PUT 必须有一个拿到 409：否则 AI 的旧稿会静默覆盖运营的微调。
@@ -219,10 +246,10 @@ func TestInstallLifecycle(t *testing.T) {
 
 	// 停用：读放行、写拒绝。
 	disabled := model.AppPluginInstallDisabled
-	if _, err := Patch(ctx, gdb, 7, "mini", PatchInput{Status: &disabled, ExpectedVersion: 1}); err != nil {
+	if _, _, err := Patch(ctx, gdb, 7, "mini", PatchInput{Status: &disabled, ExpectedVersion: 1}); err != nil {
 		t.Fatalf("停用失败: %v", err)
 	}
-	if _, _, err := ListRecords(ctx, gdb, 7, "mini", "a", "", 0, 10); err != nil {
+	if _, _, err := listRecords(gdb, 7, "mini", "a", "", 0, 10); err != nil {
 		t.Fatalf("停用后仍应可读: %v", err)
 	}
 	if _, err := Create(ctx, gdb, 7, "mini", "a", json.RawMessage(`{"no":"N-2"}`)); err == nil {
@@ -233,7 +260,7 @@ func TestInstallLifecycle(t *testing.T) {
 	if err := Uninstall(ctx, gdb, 7, "mini"); err != nil {
 		t.Fatalf("卸载失败: %v", err)
 	}
-	if _, _, err := ListRecords(ctx, gdb, 7, "mini", "a", "", 0, 10); err != ErrNotInstalled {
+	if _, _, err := listRecords(gdb, 7, "mini", "a", "", 0, 10); err != ErrNotInstalled {
 		t.Fatalf("卸载后读应报未安装，实际 %v", err)
 	}
 	d, err := GetDetail(ctx, gdb, 7, "mini")
@@ -247,10 +274,10 @@ func TestInstallLifecycle(t *testing.T) {
 	// 重新启用：记录仍在。
 	enabled := model.AppPluginInstallEnabled
 	// 卸载也会 +1（每次状态变化都推进版本），所以这里用 3 而不是 2。
-	if _, err := Patch(ctx, gdb, 7, "mini", PatchInput{Status: &enabled, ExpectedVersion: 3}); err != nil {
+	if _, _, err := Patch(ctx, gdb, 7, "mini", PatchInput{Status: &enabled, ExpectedVersion: 3}); err != nil {
 		t.Fatalf("重新启用失败: %v", err)
 	}
-	items, total, err := ListRecords(ctx, gdb, 7, "mini", "a", "", 0, 10)
+	items, total, err := listRecords(gdb, 7, "mini", "a", "", 0, 10)
 	if err != nil || total != 1 || len(items) != 1 {
 		t.Fatalf("重新启用后记录应仍在，实际 total=%d err=%v", total, err)
 	}
@@ -339,7 +366,7 @@ func TestScopeIsolatesApps(t *testing.T) {
 		t.Fatalf("第二个应用安装失败: %v", err)
 	}
 	createRecord(t, gdb, 7, "mini", "a", map[string]any{"no": "A-1"})
-	if _, total, err := ListRecords(ctx, gdb, 8, "mini", "a", "", 0, 10); err != nil || total != 0 {
+	if _, total, err := listRecords(gdb, 8, "mini", "a", "", 0, 10); err != nil || total != 0 {
 		t.Fatalf("应用 8 看不到应用 7 的数据，实际 total=%d err=%v", total, err)
 	}
 }
@@ -362,32 +389,32 @@ func TestKeywordSearchCoversUniqueField(t *testing.T) {
 	createRecord(t, gdb, 7, "mini", "a", map[string]any{"no": "T-1002"})
 
 	// ① 业务唯一值能搜到；大小写不敏感（unique_norm 已 trim+lower）
-	items, total, err := ListRecords(ctx, gdb, 7, "mini", "a", " t-1001 ", 0, 10)
+	items, total, err := listRecords(gdb, 7, "mini", "a", " t-1001 ", 0, 10)
 	if err != nil || total != 1 || len(items) != 1 || items[0].RecordKey != first.RecordKey {
 		t.Fatalf("按唯一值搜索应命中 1 条，实际 total=%d items=%d err=%v", total, len(items), err)
 	}
 
 	// ② 对外编号（ULID）仍可搜
-	if _, total, err := ListRecords(ctx, gdb, 7, "mini", "a", first.RecordKey[:12], 0, 10); err != nil || total != 1 {
+	if _, total, err := listRecords(gdb, 7, "mini", "a", first.RecordKey[:12], 0, 10); err != nil || total != 1 {
 		t.Fatalf("按编号搜索应命中 1 条，实际 total=%d err=%v", total, err)
 	}
 
 	// ③ 不查 JSONB 正文：备注里的词搜不到（否则同一句话命中一片，说不清理由）
-	if _, total, err := ListRecords(ctx, gdb, 7, "mini", "a", "空白", 0, 10); err != nil || total != 0 {
+	if _, total, err := listRecords(gdb, 7, "mini", "a", "空白", 0, 10); err != nil || total != 0 {
 		t.Fatalf("关键词不应命中正文，实际 total=%d err=%v", total, err)
 	}
 
 	// ④ 作用域：应用 8 搜应用 7 的单号，必须 0 条
-	if _, total, err := ListRecords(ctx, gdb, 8, "mini", "a", "T-1001", 0, 10); err != nil || total != 0 {
+	if _, total, err := listRecords(gdb, 8, "mini", "a", "T-1001", 0, 10); err != nil || total != 0 {
 		t.Fatalf("关键词越过了应用作用域，实际 total=%d err=%v", total, err)
 	}
 
 	// ⑤ 导出与列表同源：两处各写一遍 WHERE 就会分叉成"导出比列表多"
-	_, n, err := ExportPlan(ctx, gdb, 7, "mini", "a", "t-1001")
+	ev, q, n, err := exportPlan(gdb, 7, "mini", "a", "t-1001")
 	if err != nil || n != 1 {
 		t.Fatalf("导出计数应为 1，实际 n=%d err=%v", n, err)
 	}
-	rows, err := ExportBatch(ctx, gdb, 7, "mini", "a", "t-1001", 0, 100)
+	rows, err := ExportBatch(context.Background(), gdb, 7, "mini", "a", ev, q, 0, 100)
 	if err != nil || len(rows) != 1 {
 		t.Fatalf("导出行应为 1，实际 %d err=%v", len(rows), err)
 	}
@@ -459,11 +486,11 @@ func TestReenableAlignsVersion(t *testing.T) {
 	}
 
 	disabled := model.AppPluginInstallDisabled
-	if _, err := Patch(ctx, gdb, 7, "mini", PatchInput{Status: &disabled, ExpectedVersion: 1}); err != nil {
+	if _, _, err := Patch(ctx, gdb, 7, "mini", PatchInput{Status: &disabled, ExpectedVersion: 1}); err != nil {
 		t.Fatalf("停用失败: %v", err)
 	}
 	enabled := model.AppPluginInstallEnabled
-	if _, err := Patch(ctx, gdb, 7, "mini", PatchInput{Status: &enabled, ExpectedVersion: 2}); err != nil {
+	if _, _, err := Patch(ctx, gdb, 7, "mini", PatchInput{Status: &enabled, ExpectedVersion: 2}); err != nil {
 		t.Fatalf("重新启用失败: %v", err)
 	}
 	d2, err := GetDetail(ctx, gdb, 7, "mini")
@@ -515,17 +542,17 @@ func TestExportPlan(t *testing.T) {
 	gdb := withPluginDB(t)
 	ctx := context.Background()
 	importOK(t, gdb, mini, 0, false)
-	if _, _, err := ExportPlan(ctx, gdb, 7, "mini", "a", ""); err == nil {
+	if _, _, _, err := exportPlan(gdb, 7, "mini", "a", ""); err == nil {
 		t.Fatal("未安装时应拒绝导出")
 	}
 	if _, err := Install(ctx, gdb, 7, "mini", map[string]any{}); err != nil {
 		t.Fatalf("安装失败: %v", err)
 	}
-	e, n, err := ExportPlan(ctx, gdb, 7, "mini", "a", "")
+	e, _, n, err := exportPlan(gdb, 7, "mini", "a", "")
 	if err != nil || n != 0 || e.Key != "a" {
 		t.Fatalf("导出计划不对: e=%+v n=%d err=%v", e, n, err)
 	}
-	if _, _, err := ExportPlan(ctx, gdb, 7, "mini", "nope", ""); err != ErrEntityNotFound {
+	if _, _, _, err := exportPlan(gdb, 7, "mini", "nope", ""); err != ErrEntityNotFound {
 		t.Fatalf("未知对象应 404，实际 %v", err)
 	}
 }
@@ -586,7 +613,7 @@ func TestPublicListGates(t *testing.T) {
 	}
 
 	yes := true
-	if _, err := Patch(ctx, gdb, 7, "mini", PatchInput{PublicEnabled: &yes, ExpectedVersion: lockOf()}); err != nil {
+	if _, _, err := Patch(ctx, gdb, 7, "mini", PatchInput{PublicEnabled: &yes, ExpectedVersion: lockOf()}); err != nil {
 		t.Fatalf("打开对外只读失败: %v", err)
 	}
 	page, err := PublicList(ctx, gdb, 7, "mini", "a", 1, 10)
@@ -611,14 +638,14 @@ func TestPublicListGates(t *testing.T) {
 
 	// ④ 停用（冻结）→ 404。
 	disabled := model.AppPluginInstallDisabled
-	if _, err := Patch(ctx, gdb, 7, "mini", PatchInput{Status: &disabled, ExpectedVersion: lockOf()}); err != nil {
+	if _, _, err := Patch(ctx, gdb, 7, "mini", PatchInput{Status: &disabled, ExpectedVersion: lockOf()}); err != nil {
 		t.Fatalf("停用失败: %v", err)
 	}
 	if _, err := PublicList(ctx, gdb, 7, "mini", "a", 1, 10); err != ErrNotFound {
 		t.Fatalf("停用后不应对外，实际 %v", err)
 	}
 	enabled := model.AppPluginInstallEnabled
-	if _, err := Patch(ctx, gdb, 7, "mini", PatchInput{Status: &enabled, ExpectedVersion: lockOf()}); err != nil {
+	if _, _, err := Patch(ctx, gdb, 7, "mini", PatchInput{Status: &enabled, ExpectedVersion: lockOf()}); err != nil {
 		t.Fatalf("重新启用失败: %v", err)
 	}
 
@@ -642,7 +669,7 @@ func TestPublicListGates(t *testing.T) {
 	}
 
 	// ⑦ 分页越界收敛（不报错，也不能真的取 500 条）。
-	if _, err := Patch(ctx, gdb, 7, "mini", PatchInput{Status: &enabled, ExpectedVersion: lockOf()}); err != nil {
+	if _, _, err := Patch(ctx, gdb, 7, "mini", PatchInput{Status: &enabled, ExpectedVersion: lockOf()}); err != nil {
 		t.Fatalf("重新启用失败: %v", err)
 	}
 	p2, err := PublicList(ctx, gdb, 7, "mini", "a", 0, 500)

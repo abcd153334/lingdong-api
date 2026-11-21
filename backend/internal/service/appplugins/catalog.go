@@ -228,7 +228,38 @@ func diffManifest(ctx context.Context, gdb *gorm.DB, key string, old, next *Mani
 				"唯一字段从 %q 改为 %q：会按新字段重算全部记录的唯一值，冲突则整体失败", oe.Unique, ne.Unique))
 		}
 	}
+
+	// 新增必填配置：已安装的应用需要补填。不阻断导入（它不是数据破坏），
+	// 但必须在"升级那一刻"可见 —— 否则管理员只会在某次保存配置时撞上
+	// "启用前必须填写"，却不知道是这次升级带来的。
+	for i := range next.Config {
+		f := &next.Config[i]
+		if !f.Required {
+			continue
+		}
+		if _, existed := old.ConfigField(f.Key); existed {
+			continue
+		}
+		n, err := countLiveInstalls(ctx, gdb, key)
+		if err != nil {
+			return nil, nil, err
+		}
+		affected = append(affected, Affected{
+			Field:   "config." + f.Key,
+			Records: n,
+			Reason:  "新增必填配置，已安装的应用需要补填",
+		})
+	}
 	return breaking, affected, nil
+}
+
+// countLiveInstalls 数"还没卸载"的安装数：已卸载的应用不需要补配置。
+func countLiveInstalls(ctx context.Context, gdb *gorm.DB, key string) (int64, error) {
+	var n int64
+	err := gdb.WithContext(ctx).Model(&model.AppPluginInstall{}).
+		Where("plugin_key = ? AND status <> ?", key, model.AppPluginInstallRemoved).
+		Count(&n).Error
+	return n, err
 }
 
 // countRecords 数"带某个字段"的存量记录数；field 为空时数该实体全部。

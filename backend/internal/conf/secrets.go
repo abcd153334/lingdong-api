@@ -49,6 +49,17 @@ var publicSecretValues = map[string]string{
 // minJWTSecretLen 是 HS256 建议的最小密钥长度（RFC 7518 §3.2：≥ 摘要长度 256 bit）。
 const minJWTSecretLen = 32
 
+// APP_ENCRYPTION_KEY 的长度门槛。
+//
+// 服务端一律 SHA-256 派生（crypto.DeriveKey），所以**任意长度都能跑**；门槛只防
+// 「口令本身没有熵」。硬下限取 16 而不是 32：现网存在 24 字符密钥且今天正常工作
+// （旧实现直用 AES-192），卡到 32 会让升级当天起不来。32 位只作为推荐值，
+// 由 preflight 与 .env.example 提示。
+const (
+	minAppKeyLen         = 16
+	recommendedAppKeyLen = 32
+)
+
 // ValidateSecrets 校验「一旦泄露就等于交出全站」的密钥，以及只在测试环境允许的后门。
 //
 // dev/test 只返回警告（本地起服务不该被强口令卡住），其余环境一律拒绝启动 ——
@@ -75,6 +86,9 @@ func ValidateSecrets(e Env) (warnings []string, err error) {
 	if devLike {
 		if _, bad := publicSecretValues[e.AppEncryptionKey]; bad || strings.TrimSpace(e.AppEncryptionKey) == "" {
 			warnings = append(warnings, "APP_ENCRYPTION_KEY 是公开示例值：库里的 API KEY / 渠道密钥可被还原")
+		} else if len(strings.TrimSpace(e.AppEncryptionKey)) < minAppKeyLen {
+			warnings = append(warnings, fmt.Sprintf(
+				"APP_ENCRYPTION_KEY 只有 %d 位：本地可以跑，部署到生产会被拒绝启动", len(strings.TrimSpace(e.AppEncryptionKey))))
 		}
 		if strings.Contains(e.AllowedOrigins, "*") {
 			warnings = append(warnings, "LD_ALLOWED_ORIGINS 含 *：浏览器会拒绝携带凭证的跨域请求")
@@ -87,6 +101,14 @@ func ValidateSecrets(e Env) (warnings []string, err error) {
 		return nil, fmt.Errorf("APP_ENCRYPTION_KEY 未配置：拒绝启动（空密钥无法保护库内密文）")
 	case isPublicSecret(e.AppEncryptionKey):
 		return nil, fmt.Errorf("APP_ENCRYPTION_KEY 仍是公开示例值：拒绝启动，请改用 openssl rand -hex 32 生成")
+	case len(strings.TrimSpace(e.AppEncryptionKey)) < minAppKeyLen:
+		return nil, fmt.Errorf("APP_ENCRYPTION_KEY 只有 %d 位：至少 %d 位（建议 openssl rand -hex 32）",
+			len(strings.TrimSpace(e.AppEncryptionKey)), minAppKeyLen)
+	}
+	if n := len(strings.TrimSpace(e.AppEncryptionKey)); n < recommendedAppKeyLen {
+		warnings = append(warnings, fmt.Sprintf(
+			"APP_ENCRYPTION_KEY 为 %d 位：能正常派生，但建议至少 %d 位（openssl rand -hex 32 生成 64 位）",
+			n, recommendedAppKeyLen))
 	}
 	return nil, nil
 }

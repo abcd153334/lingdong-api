@@ -148,6 +148,17 @@ html {
   }
 }
 
+/* 弹窗顶栏里的页签条：任何宽度都不画滚动条。
+   与上面那条不同，这里**不限媒体查询** —— 顶栏高度是弹窗几何的一部分
+   （768–1023px 也会横滚），多出一条 10px 横条会把顶栏撑高一截。
+   必须写在 app.css：X11 门禁规定滚动条声明只能出现在这个文件。 */
+.dl-head .tabs {
+  scrollbar-width: none;
+}
+.dl-head .tabs::-webkit-scrollbar {
+  display: none;
+}
+
 /* 品牌渐变（对齐 prototype.css --grad / .p-logo .dot） */
 .bg-grad {
   background-image: var(--grad);

@@ -52,6 +52,8 @@ const (
 	ActionUpdate = "update"
 	ActionDelete = "delete"
 	ActionExport = "export"
+	// ActionBatchDelete 批量删除。依赖 delete：只是为了少点几次，不额外授予删除权。
+	ActionBatchDelete = "batch_delete"
 )
 
 // 基座上限。manifest 只能更严，不能更宽（不信任导入方声明的容量）。
@@ -67,6 +69,21 @@ const (
 	MaxEnumOptions     = 50
 	MaxRecordsCap      = 100000
 	DefaultMaxRecords  = 20000
+	// MaxSortKeys 可排序白名单上限：界面上只表达单列排序，多余条目没有消费者。
+	MaxSortKeys = 3
+	// MaxFilters 筛选器上限：工具栏一行放得下、SQL 参数可控。
+	MaxFilters = 4
+	// MaxBatchDelete 单次批量删除上限（一次请求的参数与审计体积都有界）。
+	MaxBatchDelete = 100
+	// MaxFormSections 表单分段上限：再多就不该塞进一个弹窗了。
+	MaxFormSections = 4
+	// MaxHelpLen / MaxPlaceholderLen：字段下方的常驻说明与输入框占位。
+	// 超过这个长度就不是"提示"而是"正文"，正文该进开发文档。
+	MaxHelpLen        = 200
+	MaxPlaceholderLen = 32
+	// DefaultFormSectionTitle 是"未列进任何分段的字段"被追加到的那一段的标题。
+	// 定成常量而不是让前端写死：文案归内容，前端不造字。
+	DefaultFormSectionTitle = "其他"
 )
 
 // Field 既是记录字段也是插件配置字段（同一套词表，避免两套类型系统）。
@@ -78,7 +95,43 @@ type Field struct {
 	MaxLen   int      `json:"maxLen"`
 	Options  []string `json:"options"`
 	// Default 只在表单初值里用，**不写进记录**：否则改默认值会与存量数据打架。
+	//
+	// 唯一例外：**必填**字段缺失时由服务端取默认值（见 record.Create）。
+	// 可选字段不注入 —— 前端"清空"就是不带这个键，注入会让"清空"永久不可达。
 	Default any `json:"default"`
+	// Help 是字段下方的常驻说明（"填什么、留空什么后果"），不是"为什么"。
+	// 纯规则解释（为什么要这么填）应当写进文档，而不是挤进表单。
+	Help string `json:"help"`
+	// Placeholder 是输入框的占位提示（≤32 字，长了会被截断成噪音）。
+	Placeholder string `json:"placeholder"`
+	// ReadOnly 只影响表单渲染（禁改），**不是安全边界**：写入判据仍只有
+	// manifest 声明与安装状态，脚本直接 PUT 一样能改。
+	ReadOnly bool `json:"readOnly"`
+	// Min/Max 只对 int 生效（范围提示 + 服务端校验）。
+	Min *int64 `json:"min"`
+	Max *int64 `json:"max"`
+}
+
+// FormSection 是表单的一段（"基本信息""处理信息"），可两列。
+//
+// Fields 写字段 key；未列进任何分段的字段由 Describe 追加到末尾的默认段 ——
+// 校验层面要求"每个字段恰好属于一段"，投影层面保证"没有字段会消失"。
+type FormSection struct {
+	Title   string   `json:"title"`
+	Columns int      `json:"columns"`
+	Fields  []string `json:"fields"`
+}
+
+// EntityForm 是表单布局声明。nil = 一段单列（前端按字段声明顺序渲染）。
+type EntityForm struct {
+	Sections []FormSection `json:"sections"`
+}
+
+// SortKey 是 `list.sort` 的一项：字段 + 方向。首项同时是**默认排序**。
+type SortKey struct {
+	Field string `json:"field"`
+	// Order 只有 asc / desc；缺省按 desc（"最新/最大在前"是列表的默认期待）。
+	Order string `json:"order"`
 }
 
 // EntityList 是实体的列表视图。刻意不做独立的 views[]：
@@ -87,6 +140,15 @@ type Field struct {
 type EntityList struct {
 	Columns []string `json:"columns"`
 	Actions []string `json:"actions"`
+	// Sort 是可排序**白名单**（≤3，首项为默认排序）。
+	//
+	// 为什么是白名单而不是"任意列都能排"：允许按 data->>'x' 排序意味着任意
+	// JSONB 表达式参与 Sort，代价与注入面都不可控；白名单让"能排哪几列"成为
+	// 作者显式声明的能力，也让前端知道该给哪列表头加排序箭头。
+	Sort []SortKey `json:"sort"`
+	// Filters 是可筛选**白名单**（≤4）。操作符由字段类型决定（见 types_meta.go），
+	// 不在这里声明 —— 否则同一个事实会有两份定义。
+	Filters []string `json:"filters"`
 }
 
 // Entity 是一种业务对象（工单、地址、白名单…）。
@@ -96,6 +158,8 @@ type Entity struct {
 	Unique string     `json:"unique"`
 	Fields []Field    `json:"fields"`
 	List   EntityList `json:"list"`
+	// Form 是表单布局（分段 + 列数）。不声明 = 单段单列。
+	Form *EntityForm `json:"form"`
 	// Public 是**对外只读的字段白名单**：只有列在这里的字段会被免凭证端点
 	// （GET /api/apps/:slug/p/:plugin/:entity）下发。空 = 这个对象不对外。
 	//
@@ -148,13 +212,9 @@ var reservedFieldKeys = map[string]bool{
 	"created_at": true, "updated_at": true,
 }
 
-var fieldTypes = map[string]bool{
-	TypeString: true, TypeText: true, TypeInt: true,
-	TypeBool: true, TypeEnum: true, TypeDate: true, TypeLink: true,
-}
-
 var actionSet = map[string]bool{
-	ActionCreate: true, ActionUpdate: true, ActionDelete: true, ActionExport: true,
+	ActionCreate: true, ActionUpdate: true, ActionDelete: true,
+	ActionExport: true, ActionBatchDelete: true,
 }
 
 // Decode 严格解析 manifest：未知字段直接拒（先例 planspec.go:76-79 —— 宽容解析
@@ -248,6 +308,29 @@ func (m *Manifest) normalize() {
 		}
 		for j := range e.List.Columns {
 			e.List.Columns[j] = strings.TrimSpace(e.List.Columns[j])
+		}
+		for j := range e.List.Sort {
+			e.List.Sort[j].Field = strings.TrimSpace(e.List.Sort[j].Field)
+			o := strings.ToLower(strings.TrimSpace(e.List.Sort[j].Order))
+			if o == "" {
+				o = "desc" // 缺省方向：最新/最大在前
+			}
+			e.List.Sort[j].Order = o
+		}
+		for j := range e.List.Filters {
+			e.List.Filters[j] = strings.TrimSpace(e.List.Filters[j])
+		}
+		if e.Form != nil {
+			for j := range e.Form.Sections {
+				sec := &e.Form.Sections[j]
+				sec.Title = strings.TrimSpace(sec.Title)
+				if sec.Columns <= 0 {
+					sec.Columns = 1
+				}
+				for k := range sec.Fields {
+					sec.Fields[k] = strings.TrimSpace(sec.Fields[k])
+				}
+			}
 		}
 	}
 }
@@ -359,6 +442,98 @@ func (m *Manifest) Validate(wantKey string) []Problem {
 			}
 			seenAct[a] = true
 		}
+		// 批量删除依赖删除：它只是"少点几次"，不额外授予删除权。
+		if seenAct[ActionBatchDelete] && !seenAct[ActionDelete] {
+			add(problem(base+".list.actions", "批量删除依赖删除操作，请同时声明 %q", ActionDelete))
+		}
+
+		// sort：白名单。字段存在 + 类型可排 + 不重复 + 方向合法 + 数量上限。
+		if len(e.List.Sort) > MaxSortKeys {
+			add(problem(base+".list.sort", "可排序字段最多 %d 个", MaxSortKeys))
+		}
+		seenSort := map[string]bool{}
+		for j := range e.List.Sort {
+			sk := &e.List.Sort[j]
+			p := fmt.Sprintf("%s.list.sort[%d]", base, j)
+			if sk.Order != "asc" && sk.Order != "desc" {
+				add(problem(p+".order", "排序方向只能是 asc 或 desc"))
+			}
+			if seenSort[sk.Field] {
+				add(problem(p+".field", "字段 %q 重复", sk.Field))
+			}
+			seenSort[sk.Field] = true
+			if _, ok := builtinSortable(sk.Field); ok {
+				continue // 内置键（编号/创建时间/更新时间）不走字段表
+			}
+			f, ok := e.field(sk.Field)
+			if !ok {
+				add(problem(p+".field", "字段 %q 不存在", sk.Field))
+				continue
+			}
+			spec, _ := typeSpec(f.Type)
+			switch {
+			case !spec.CanSort:
+				add(problem(p+".field", "%s 类型不能排序", f.Type))
+			case spec.SortNeedsShort && f.MaxLen > MaxUniqueLen:
+				add(problem(p+".field", "排序字段最长 %d 个字符（当前 %d）", MaxUniqueLen, f.MaxLen))
+			}
+		}
+
+		// filters：白名单。操作符由字段类型决定，不在这里重复声明。
+		if len(e.List.Filters) > MaxFilters {
+			add(problem(base+".list.filters", "可筛选字段最多 %d 个", MaxFilters))
+		}
+		seenFilter := map[string]bool{}
+		for j, k := range e.List.Filters {
+			p := fmt.Sprintf("%s.list.filters[%d]", base, j)
+			if seenFilter[k] {
+				add(problem(p, "字段 %q 重复", k))
+			}
+			seenFilter[k] = true
+			f, ok := e.field(k)
+			if !ok {
+				add(problem(p, "字段 %q 不存在", k))
+				continue
+			}
+			if spec, _ := typeSpec(f.Type); spec.FilterOp == "" {
+				add(problem(p, "%s 类型不支持筛选", f.Type))
+			}
+		}
+
+		// form：分段布局。分段的字段必须存在、不许跨段重复、段内不能为空。
+		// 「未列出的字段」不报错：投影期会被追加到末段（保证"声明了却看不见"不会发生）。
+		if e.Form != nil {
+			if len(e.Form.Sections) > MaxFormSections {
+				add(problem(base+".form.sections", "表单分段最多 %d 个", MaxFormSections))
+			}
+			if len(e.Form.Sections) == 0 {
+				add(problem(base+".form.sections", "声明了 form 就至少要有一个分段（不声明即为单段单列）"))
+			}
+			seenForm := map[string]bool{}
+			for j := range e.Form.Sections {
+				sec := &e.Form.Sections[j]
+				p := fmt.Sprintf("%s.form.sections[%d]", base, j)
+				if n := utf8.RuneCountInString(sec.Title); n == 0 || n > 32 {
+					add(problem(p+".title", "分段标题需要 1-32 个字符"))
+				}
+				if sec.Columns != 1 && sec.Columns != 2 {
+					add(problem(p+".columns", "列数只能是 1 或 2"))
+				}
+				if len(sec.Fields) == 0 {
+					add(problem(p+".fields", "分段里至少要有一个字段"))
+				}
+				for k, fk := range sec.Fields {
+					fp := fmt.Sprintf("%s.fields[%d]", p, k)
+					if _, ok := e.field(fk); !ok {
+						add(problem(fp, "字段 %q 不存在", fk))
+					}
+					if seenForm[fk] {
+						add(problem(fp, "字段 %q 在多个分段里重复", fk))
+					}
+					seenForm[fk] = true
+				}
+			}
+		}
 
 		// unique 只能指向可比较、进得了 unique_norm(≤64) 的字段。
 		if e.Unique != "" {
@@ -411,7 +586,7 @@ func validateFields(fields []Field, base string) []Problem {
 		if n := utf8.RuneCountInString(f.Label); n == 0 || n > 32 {
 			ps = append(ps, problem(p+".label", "显示名需要 1-32 个字符"))
 		}
-		if !fieldTypes[f.Type] {
+		if !typeSpecOK(f.Type) {
 			ps = append(ps, problem(p+".type", "不支持的类型 %q（可用 string/text/int/bool/enum/date/link）", f.Type))
 			continue
 		}
@@ -440,6 +615,29 @@ func validateFields(fields []Field, base string) []Problem {
 					ps = append(ps, problem(fmt.Sprintf("%s.options[%d]", p, j), "取值 %q 重复", o))
 				}
 				seenOpt[o] = true
+			}
+		}
+
+		// 表单提示：只校验形状（长度/范围），文案内容不在这里评判。
+		if n := utf8.RuneCountInString(f.Help); n > MaxHelpLen {
+			ps = append(ps, problem(p+".help", "说明最多 %d 个字符（当前 %d），长文请写进开发文档", MaxHelpLen, n))
+		}
+		if n := utf8.RuneCountInString(f.Placeholder); n > MaxPlaceholderLen {
+			ps = append(ps, problem(p+".placeholder", "占位提示最多 %d 个字符", MaxPlaceholderLen))
+		}
+		if f.Min != nil || f.Max != nil {
+			switch {
+			case f.Type != TypeInt:
+				ps = append(ps, problem(p+".min", "只有整数类型支持 min/max"))
+			case f.Min != nil && f.Max != nil && *f.Min > *f.Max:
+				ps = append(ps, problem(p+".min", "最小值不能大于最大值"))
+			}
+		}
+		// 默认值本身必须合法：必填字段缺失时服务端会**拿它入账**，
+		// 一个不合法的 default 等于把脏数据写进记录（且从表单上看不出是它干的）。
+		if f.Default != nil {
+			if _, msg := normalizeField(f, f.Default, true); msg != "" {
+				ps = append(ps, problem(p+".default", "默认值不合法：%s", msg))
 			}
 		}
 	}
@@ -502,6 +700,26 @@ type FieldView struct {
 	MaxLen   int      `json:"maxLen"`
 	Options  []string `json:"options,omitempty"`
 	Default  any      `json:"default,omitempty"`
+	// Help/Placeholder/ReadOnly/Min/Max 是表单呈现的全部依据：前端不再读 manifest。
+	Help        string `json:"help,omitempty"`
+	Placeholder string `json:"placeholder,omitempty"`
+	ReadOnly    bool   `json:"readOnly,omitempty"`
+	Min         *int64 `json:"min,omitempty"`
+	Max         *int64 `json:"max,omitempty"`
+}
+
+// FormSectionView 是**投影后**的表单分段：字段 key 已补全为"本对象全部字段恰好出现一次"。
+// 前端不需要再算"哪些字段没排进去"，也不需要自己造一个默认段标题。
+type FormSectionView struct {
+	Title   string   `json:"title"`
+	Columns int      `json:"columns"`
+	Fields  []string `json:"fields"`
+}
+
+// FormView 恒至少有一段（未声明 form 时就是"单段单列、按字段声明顺序"），
+// 因此前端直接 for 循环即可，不做空值判断、不写兜底分支。
+type FormView struct {
+	Sections []FormSectionView `json:"sections"`
 }
 
 type ColumnView struct {
@@ -510,9 +728,29 @@ type ColumnView struct {
 	Type  string `json:"type"`
 }
 
+// SortView 是排序白名单的一项（含默认方向）。前端据此决定哪列可点、初始箭头朝哪。
+type SortView struct {
+	Key   string `json:"key"`
+	Label string `json:"label"`
+	Type  string `json:"type"`
+	Order string `json:"order"`
+}
+
+// FilterView 是筛选白名单的一项。Op 是**行为声明**（eq/range/contains），
+// 前端按它选控件，服务端按它拼 WHERE —— 两边同源，不做类型推断的第二份实现。
+type FilterView struct {
+	Key   string `json:"key"`
+	Label string `json:"label"`
+	Type  string `json:"type"`
+	Op    string `json:"op"`
+}
+
 type ListView struct {
 	Columns []ColumnView `json:"columns"`
 	Actions []string     `json:"actions"`
+	// Sort/Filters 恒为数组（空也是 []）：前端直接 .length，不做空值判断。
+	Sort    []SortView   `json:"sort"`
+	Filters []FilterView `json:"filters"`
 }
 
 type EntityView struct {
@@ -521,6 +759,8 @@ type EntityView struct {
 	Unique string      `json:"unique"`
 	Fields []FieldView `json:"fields"`
 	List   ListView    `json:"list"`
+	// Form 是表单布局（恒有值，见 FormView）。
+	Form FormView `json:"form"`
 	// Public 是可直接对外读取的字段 key（顺序按 manifest）。空数组 = 不对外，
 	// 前端据此决定"对外只读"开关是否有效、复制哪个地址。
 	Public []string `json:"public"`
@@ -545,6 +785,8 @@ func (f *Field) view() FieldView {
 		Key: f.Key, Label: f.Label, Type: f.Type,
 		Required: f.Required, MaxLen: f.MaxLen,
 		Options: f.Options, Default: f.Default,
+		Help: f.Help, Placeholder: f.Placeholder, ReadOnly: f.ReadOnly,
+		Min: f.Min, Max: f.Max,
 	}
 }
 
@@ -572,15 +814,87 @@ func (m *Manifest) Describe() *Descriptor {
 		for j := range e.Fields {
 			ev.Fields = append(ev.Fields, e.Fields[j].view())
 		}
-		ev.List.Actions = append([]string(nil), e.List.Actions...)
+		ev.List.Actions = append(make([]string, 0, len(e.List.Actions)), e.List.Actions...)
 		for _, c := range e.List.Columns {
 			if f, ok := e.field(c); ok {
 				ev.List.Columns = append(ev.List.Columns, ColumnView{Key: f.Key, Label: f.Label, Type: f.Type})
 			}
 		}
+		ev.List.Sort = make([]SortView, 0, len(e.List.Sort))
+		for j := range e.List.Sort {
+			sk := &e.List.Sort[j]
+			if t, ok := builtinSortable(sk.Field); ok {
+				ev.List.Sort = append(ev.List.Sort, SortView{
+					Key: sk.Field, Label: builtinSortLabel(sk.Field), Type: t, Order: sk.Order,
+				})
+				continue
+			}
+			if f, ok := e.field(sk.Field); ok {
+				ev.List.Sort = append(ev.List.Sort, SortView{Key: f.Key, Label: f.Label, Type: f.Type, Order: sk.Order})
+			}
+		}
+		ev.List.Filters = make([]FilterView, 0, len(e.List.Filters))
+		for _, k := range e.List.Filters {
+			if f, ok := e.field(k); ok {
+				spec, _ := typeSpec(f.Type)
+				ev.List.Filters = append(ev.List.Filters, FilterView{
+					Key: f.Key, Label: f.Label, Type: f.Type, Op: spec.FilterOp,
+				})
+			}
+		}
+		ev.Form = e.formView()
 		d.Entities = append(d.Entities, ev)
 	}
 	return d
+}
+
+// formView 把表单声明投影成"每个字段恰好出现一次"的分段列表。
+//
+// 两条保证（前端因此不需要兜底分支）：
+//  1. 至少有一段；
+//  2. 声明过、但 form 里漏掉的字段会被追加到末段 —— 否则"加了字段却没有输入框"
+//     会变成一类只有用户才会撞上的 bug（后台表单必须覆盖前台每个字，反过来也不行）。
+func (e *Entity) formView() FormView {
+	listed := map[string]bool{}
+	out := FormView{Sections: make([]FormSectionView, 0, 2)}
+	if e.Form != nil {
+		for _, sec := range e.Form.Sections {
+			fields := make([]string, 0, len(sec.Fields))
+			for _, k := range sec.Fields {
+				if _, ok := e.field(k); !ok {
+					continue // 校验期已报错，投影期跳过：不把不存在的 key 抛给前端
+				}
+				if listed[k] {
+					continue
+				}
+				listed[k] = true
+				fields = append(fields, k)
+			}
+			if len(fields) == 0 {
+				continue
+			}
+			cols := sec.Columns
+			if cols != 2 {
+				cols = 1
+			}
+			out.Sections = append(out.Sections, FormSectionView{Title: sec.Title, Columns: cols, Fields: fields})
+		}
+	}
+	rest := make([]string, 0, len(e.Fields))
+	for i := range e.Fields {
+		if !listed[e.Fields[i].Key] {
+			rest = append(rest, e.Fields[i].Key)
+		}
+	}
+	if len(rest) > 0 {
+		// 未声明 form 时标题留空：前端不渲染段头，与"没有分段"看起来完全一样。
+		title := ""
+		if e.Form != nil {
+			title = DefaultFormSectionTitle
+		}
+		out.Sections = append(out.Sections, FormSectionView{Title: title, Columns: 1, Fields: rest})
+	}
+	return out
 }
 
 // ActionAllowed 判断实体是否声明了某个操作（导出/建/改/删的入口闸）。
@@ -591,6 +905,64 @@ func (e *Entity) ActionAllowed(action string) bool {
 		}
 	}
 	return false
+}
+
+// builtinSortLabel 是内置排序键的列名（进 descriptor 的表头）。
+func builtinSortLabel(key string) string {
+	switch key {
+	case SortFieldRecordKey:
+		return "编号"
+	case SortFieldCreatedAt:
+		return "创建时间"
+	case SortFieldUpdatedAt:
+		return "更新时间"
+	default:
+		return key
+	}
+}
+
+// ConfigField 按 key 找配置项（Patch 裁剪存量键、启用前必填校验共用一处判据）。
+func (m *Manifest) ConfigField(key string) (*Field, bool) {
+	for i := range m.Config {
+		if m.Config[i].Key == key {
+			return &m.Config[i], true
+		}
+	}
+	return nil, false
+}
+
+// SortAllowed 判断字段能否排序，返回展示类型。
+//
+// 与 Validate 的白名单**同一判据**：所以"能导入的"与"能排的"不会各说一套。
+func (e *Entity) SortAllowed(key string) (string, bool) {
+	if t, ok := builtinSortable(key); ok {
+		return t, true
+	}
+	f, ok := e.field(key)
+	if !ok {
+		return "", false
+	}
+	spec, ok := typeSpec(f.Type)
+	if !ok || !spec.CanSort {
+		return "", false
+	}
+	if spec.SortNeedsShort && f.MaxLen > MaxUniqueLen {
+		return "", false
+	}
+	return f.Type, true
+}
+
+// FilterAllowed 判断字段能否筛选，返回算子。理由同 SortAllowed。
+func (e *Entity) FilterAllowed(key string) (string, bool) {
+	f, ok := e.field(key)
+	if !ok {
+		return "", false
+	}
+	spec, ok := typeSpec(f.Type)
+	if !ok || spec.FilterOp == "" {
+		return "", false
+	}
+	return spec.FilterOp, true
 }
 
 // dateLayout 是 date 类型的唯一格式：不带时区、不带时分秒。

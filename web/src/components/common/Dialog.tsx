@@ -18,6 +18,24 @@ export interface DialogProps {
   open: boolean;
   onClose: () => void;
   title?: ReactNode;
+  /**
+   * 对话框的可访问名（`aria-label` 的唯一来源优先级最高）。
+   *
+   * 只在**顶栏不显示标题**时用：没有可见标题的弹窗仍是对话，必须有个稳定的名字，
+   * 否则读屏与 `getByRole("dialog", { name })` 一律退化成「对话框」。
+   * 不传则沿用 `title` 字符串（旧行为逐字不变）。
+   */
+  ariaLabel?: string;
+  /**
+   * 顶栏附加内容（渲染在标题与关闭按钮**之间**）。
+   *
+   * 用途：把导航放进顶栏而不是单独占一行（`/admin/docs` 的页签、应用管理弹窗的页签）。
+   * 不传 = 顶栏只有「标题 + 关闭」，与旧行为逐字一致。
+   *
+   * 注意宽度分配：本节点是 `flex:1 1 auto; min-width:0`，里面的东西必须自己能收缩
+   * 或滚动 —— 否则会顶破 `.dialog` 的 `max-width`（`.dialog` 没有 `overflow`）。
+   */
+  headExtra?: ReactNode;
   children: ReactNode;
   /** 页脚自定义节点（复杂页脚：含合计/多动作说明等；标准按钮对请用 actions） */
   footer?: ReactNode;
@@ -55,6 +73,8 @@ export function Dialog({
   open,
   onClose,
   title,
+  ariaLabel,
+  headExtra,
   children,
   footer,
   actions,
@@ -104,11 +124,12 @@ export function Dialog({
         )}
         role="dialog"
         aria-modal="true"
-        aria-label={typeof title === "string" ? title : "对话框"}
+        aria-label={ariaLabel ?? (typeof title === "string" ? title : "对话框")}
       >
-        {title ? (
+        {title || headExtra ? (
           <div className="dl-head">
-            <span className="dl-title">{title}</span>
+            {title ? <span className="dl-title">{title}</span> : null}
+            {headExtra ? <div className="dl-head__extra">{headExtra}</div> : null}
             {closeButton ? (
               <button
                 type="button"

@@ -37,6 +37,14 @@ func AdminTaskList(c *gin.Context) {
 		}
 		f.UserID = n
 	}
+	// 应用三态（未传 / 0=平台直连 / n=某应用）：非法值一律 400，
+	// 不能降级成「不过滤」—— 那会让运营以为筛了、实际看的是全量。
+	appID, appScoped, aok := appScopeQuery(c)
+	if !aok {
+		response.FailDef(c, errs.InvalidParam)
+		return
+	}
+	f.AppID, f.AppScoped = appID, appScoped
 	rows, total, err := task.List(c.Request.Context(), task.AllScope(), f)
 	if err != nil {
 		response.FailDef(c, errs.Internal)
@@ -47,8 +55,9 @@ func AdminTaskList(c *gin.Context) {
 		// 列表不下发产物（每条都要查一次 files = N+1），只给空数组。
 		items = append(items, task.AdminViewOf(&rows[i], taskview.ContentBaseFor(c.FullPath()), nil))
 	}
-	// 图标在 handler 层补（View 不查库）：一次 IN 覆盖整页。
+	// 图标与应用名在 handler 层补（View 不查库）：各一次 IN 覆盖整页。
 	task.FillModelIcons(c.Request.Context(), items, siteurl.Base(c))
+	task.FillApp(c.Request.Context(), items)
 	response.OK(c, pagination.New(items, total, p))
 }
 
@@ -99,6 +108,8 @@ func adminTaskView(c *gin.Context, t *model.Task) (task.AdminView, error) {
 	}
 	views := []task.AdminView{task.AdminViewOf(t, taskview.ContentBaseFor(c.FullPath()), arts)}
 	task.FillModelIcons(c.Request.Context(), views, siteurl.Base(c))
+	// 详情同样补应用：列表有、点进去没有，是这类批量补名最常见的缺口。
+	task.FillApp(c.Request.Context(), views)
 	return views[0], nil
 }
 

@@ -39,6 +39,8 @@ export interface PageTabsProps<K extends string> {
  *
  * 页签条要放进页面自己的顶栏（如 `/admin/docs`）时用 `PageTabPanels`：
  * 面板逻辑与 `PageTabs` 共用同一个 hook，**不要**手写第二套 tabpanel。
+ * 第二个用例是「应用管理弹窗」：页签住在 `.dl-head`（`Dialog` 的 `headExtra`），
+ * 只有面板留在 body 里 —— 那时页签条不在滚动容器内，"不随内容滚"由结构保证。
  */
 export function PageTabs<K extends string>({
   tabs,

@@ -50,12 +50,23 @@ export function useOverlayBehavior(
           )
         : [];
 
-    // 初始聚焦（M14）：首个可聚焦元素（无则保持当前焦点）。
-    // 两个时序坑都会让这次 focus() 落空：
+    // 初始聚焦（M14）：**优先输入类控件**，其次首个可聚焦元素（无则保持当前焦点）。
+    // 为什么不直接取 `focusables()[0]`：表单弹窗的第一个可聚焦元素往往是 label 里的
+    // 问号按钮（`Field.tip` 渲染成 button），于是一打开弹窗就把提示气泡弹在第一个
+    // 字段上、把值挡个正着 —— 用户只会当成"版式坏了"（编辑应用信息弹窗就是这么被报的）。
+    // 跳过 readonly/disabled：只读回显（如应用标识）聚焦上去既不能改、还会顶掉真输入框。
+    //
+    // 另外两个时序坑会让这次 focus() 落空：
     //   ① 打开瞬间节点仍在 visibility 过渡的起点（hidden），浏览器忽略 focus()；
     //   ② 鼠标打开时，浏览器把焦点交给触发按钮的默认动作晚于 React effect。
     // 故先用 rAF 轮询补偿（≤6 帧，落焦即停），键盘打开首帧即成功、不会重复触发。
-    const initial = focusables()[0];
+    const list = focusables();
+    const initial =
+      list.find((n) => {
+        if (!/^(INPUT|TEXTAREA|SELECT)$/.test(n.tagName)) return false;
+        const c = n as HTMLInputElement;
+        return !c.readOnly && !c.disabled;
+      }) ?? list[0];
     let rafId = 0;
     let tries = 0;
     const settleFocus = (): void => {

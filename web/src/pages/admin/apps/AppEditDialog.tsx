@@ -3,6 +3,7 @@ import { useEffect, useRef, useState } from "react";
 import { Dialog } from "@/components/common/Dialog";
 import { Field } from "@/components/common/Field";
 import { Input } from "@/components/common/Input";
+import { SwitchRow } from "@/components/common/SwitchRow";
 import { Textarea } from "@/components/common/Textarea";
 import type { AdminAppItem, AppPayload } from "@/types";
 
@@ -11,7 +12,13 @@ import { hasError, runeLen, validateAppMeta, type FormErrors } from "./validatio
 /**
  * 编辑应用的基本信息（名称 / 说明 / 自助签发开关）。
  *
- * 标识（slug）不在表单里：它已经写进接入方的部署配置，创建后不可改。
+ * 标识（slug）不在表单里、也不可改：它已经写进接入方的部署配置。
+ * 但**要显示**，且做成只读输入框（`readOnly` ⇒ 灰底 + 灰字，`.input[readonly]`）：
+ * 之前它是一段裸文本，和下面的输入框没有共同基线，看起来像漏了控件。
+ *
+ * 版式：两列栅格 —— 「标识 | 名称」一行，说明独占一行，开关独占一行。
+ * 四个字段全 `span`（各占一行）会让这个 440px 的弹窗拉成一条长竖线，
+ * 一眼看不出"标识不可改、名称可改"这层对比。
  *
  * 这个入口此前是**缺失**的：后端 `PUT /admin/apps/{id}` 早已实现，
  * 但前端没有任何调用方 —— 后果是「关闭自助签发」一旦点下去就永远改不回来，
@@ -64,6 +71,7 @@ export function AppEditDialog({
       open={open}
       onClose={close}
       title="编辑应用信息"
+      className="app-edit-dialog"
       actions={[
         { label: "取消", onClick: close, disabled: submitting },
         {
@@ -75,10 +83,10 @@ export function AppEditDialog({
       ]}
     >
       <div className="form-grid">
-        <Field label="应用标识" span tip="创建后不可改：它已写进接入方的部署配置">
-          <div className="mono">{app?.slug ?? "—"}</div>
+        <Field label="应用标识" tip="创建后不可改：它已写进接入方的部署配置">
+          <Input value={app?.slug ?? ""} readOnly className="mono" tabIndex={-1} />
         </Field>
-        <Field label="名称" req span hint={errors.name} hintWarn={!!errors.name}>
+        <Field label="名称" req hint={errors.name} hintWarn={!!errors.name}>
           <Input value={name} onChange={(e) => setName(e.target.value)} placeholder="给运营看的名字" />
         </Field>
         <Field
@@ -91,22 +99,17 @@ export function AppEditDialog({
         >
           <Textarea value={desc} onChange={(e) => setDesc(e.target.value)} rows={3} />
         </Field>
-        <Field
-          label="自助签发"
-          span
-          tip="关闭后，任何登录用户都不能再为该应用新签发托管密钥（已签发的仍可用、轮换也不受影响）"
-        >
-          <div className="link-row">
-            <label>
-              <input
-                type="checkbox"
-                checked={allowSelf}
-                onChange={(e) => setAllowSelf(e.target.checked)}
-              />
-              允许用户为自己的账号签发该应用的托管密钥
-            </label>
-          </div>
-        </Field>
+        {/* 开关不套 Field：Field 的 label 在上、控件在下，而开关行的语义是
+            「标签左、开关右」一行读完，两者叠起来会出现两个标签。 */}
+        <div className="form-item span-2">
+          <SwitchRow
+            label="允许用户为自己的账号签发该应用的托管密钥"
+            tip="关闭后，任何登录用户都不能再为该应用新签发托管密钥（已签发的仍可用、轮换也不受影响）"
+            checked={allowSelf}
+            onChange={setAllowSelf}
+            className="switch-row--inline"
+          />
+        </div>
       </div>
     </Dialog>
   );

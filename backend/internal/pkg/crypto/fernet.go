@@ -22,10 +22,22 @@ import (
 // fernetVersion 是 Fernet token 的版本字节。
 const fernetVersion byte = 0x80
 
+// DeriveKey 是全仓唯一的「任意长度口令 → 32 字节主密钥」派生。
+//
+// AES-GCM（api_keys.key_cipher、user_mfa.secret_enc）与 Fernet（渠道密钥池、
+// 存储凭据、/v1/media 能力签名）共用它：两边各写一份的历史后果是
+// 「同一个 APP_ENCRYPTION_KEY，一处认 64 字符串、另一处只认 16/24/32 字节」，
+// 于是按文档生成的密钥能存渠道密钥、却建不出 API KEY（500）。
+//
+// 调用方一律传**口令原文**，不得再传本函数的返回值（会二次派生）。
+func DeriveKey(secret []byte) []byte {
+	sum := sha256.Sum256(secret)
+	return sum[:]
+}
+
 // FernetDerive 从任意长度的口令派生 32 字节 Fernet 主密钥（避免依赖固定长度口令）。
 func FernetDerive(secret string) []byte {
-	sum := sha256.Sum256([]byte(secret))
-	return sum[:]
+	return DeriveKey([]byte(secret))
 }
 
 // FernetEncrypt 使用 Fernet 加密明文，返回 urlsafe-base64 token。

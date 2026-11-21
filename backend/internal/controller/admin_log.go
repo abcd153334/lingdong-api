@@ -50,6 +50,13 @@ func logFilterOf(c *gin.Context) (logs.Filter, bool) {
 			*p.dst = n
 		}
 	}
+	// 应用三态：未传不过滤、0=平台直连、n=某应用（app_id=0 必须能筛，
+	// 这是「平台直连的调用有多少」唯一可用的口径）。
+	appID, appScoped, ok := appScopeQuery(c)
+	if !ok {
+		return f, false
+	}
+	f.AppID, f.AppScoped = appID, appScoped
 	f.From, f.To = timeRange(c)
 	return f, true
 }

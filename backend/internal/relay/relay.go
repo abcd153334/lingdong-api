@@ -902,6 +902,9 @@ func dispatch(c *gin.Context, kind endpointKind, sess *billing.Session, candidat
 		r := &slotReleaser{fn: rel}
 		held = append(held, r)
 		cfg := channelConfig(cand.Channel, ref.Key)
+		// 按端点族抬升超时：channelConfig 拿不到 kind（它被 4 处任务链路共用，
+		// 改签名是纯噪声），所以在 dispatch 作用域里补这一句。
+		cfg.raiseTimeoutFor(kind)
 		// multipart 直链化只在适配器显式要求时发生（见 MultipartURLSupporter）：
 		// OpenAI 兼容渠道要的是原始 multipart，替它转成 JSON 反而会 400。
 		attemptBody, attemptCT, mErr := mp.forAdapter(ctx, c, adapter, kind)
@@ -1010,6 +1013,10 @@ func dispatch(c *gin.Context, kind endpointKind, sess *billing.Session, candidat
 					zap.String("adapter", cand.Channel.AdapterID),
 					zap.Error(cfgErr))
 			}
+			// 同步出图的超时不能按「上游故障」处理：换渠道 = 重新生成一次 =
+			// 付两次上游成本，用户还可能先后拿到两张不同的图。包装规则见
+			// wrapImageTimeout（只对图片族、且客户端未断开时生效）。
+			err = wrapImageTimeout(kind, err, aborted, cfg.Timeout)
 			attemptOutcome := classify(StatusOf(err), err, aborted)
 			recordAttempt(cand, ref, attemptOutcome, StatusOf(err))
 			// 连接失败/超时（没拿到任何响应）才换 key：上游 5xx 换 key 大概率还是 5xx，
@@ -1103,6 +1110,21 @@ func dispatch(c *gin.Context, kind endpointKind, sess *billing.Session, candidat
 						"稍后在调用记录/产物列表确认")
 				return
 			}
+			// 上游响应体超限：**不换渠道**。
+			//
+			// 每个渠道回的都是同一个超大垃圾体，重试只是把 N 家都撞一遍，
+			// 而图片/长文本端点每次真实出站都要付上游成本。二进制流式路径
+			// （writeResponse 处）早已这样处置，这里补上同步 JSON 路径 ——
+			// 在此之前它经 classify 落 outcomeUpstream，会先换 key 再换渠道。
+			if errors.Is(err, ErrUpstreamBodyTooLarge) {
+				cm.setErr(err.Error(), "上游响应体超过上限，已停止重试", cand.Channel, ref.Key)
+				recordAttempt(cand, ref, outcomeUpstream, 0)
+				r.Release()
+				releaseSession(c, sess, http.StatusBadGateway, cand, "", start, cm.errMsg, cm)
+				gateway.FailDefMsg(c, errs.UpstreamBodyError,
+					"上游返回的响应过大，本次未产生结果，未扣费；请勿直接重试")
+				return
+			}
 			// 插件错误串同样脱敏：它会写进 usages.error_msg（门户可见 + CSV 导出）。
 			lastErr = redactUpstream(err.Error(), cand.Channel, ref.Key)
 			r.Release()
@@ -1161,10 +1183,11 @@ func dispatch(c *gin.Context, kind endpointKind, sess *billing.Session, candidat
 				}
 			}
 			recordAttempt(cand, ref, outcomeSuccess, resp.status)
-			// 截断判据必须按**该端点自己的**上限：二进制产物的上限是 32 MiB，
-			// 用 JSON 的 8 MiB 去比会把一段正常的长音频标成 body_truncated，
-			// 于是每次长文本朗读都多出一条"上游体被截断"的假告警。
-			upLimit := int64(MaxUpstreamBodyBytes)
+			// 截断判据必须按**该端点自己的**上限，且必须与实际读取点一致
+			// （适配器侧读体走 BodyCapFor / MaxBinaryBodyBytes）：
+			// 用 chat 的 8 MiB 去比，会把长音频（32 MiB）和 4K 出图（64 MiB）
+			// 标成 body_truncated，每次正常请求都多一条假告警。
+			upLimit := BodyCapFor(spec.path)
 			if spec.binary {
 				upLimit = MaxBinaryBodyBytes
 			}
@@ -1303,8 +1326,10 @@ func dispatch(c *gin.Context, kind endpointKind, sess *billing.Session, candidat
 			gateway.FailDef(c, errs.RateLimited)
 			return
 		}
-		gateway.FailDef(c, errs.ServiceUnavailable.WithMessage(fmt.Sprintf(
-			"服务暂时不可用（HTTP %d），本次未扣费，请稍后重试", resp.status)))
+		if !failUpstreamCaller(c, resp.status) {
+			gateway.FailDef(c, errs.ServiceUnavailable.WithMessage(fmt.Sprintf(
+				"服务暂时不可用（HTTP %d），本次未扣费，请稍后重试", resp.status)))
+		}
 		return
 	}
 
@@ -1632,8 +1657,10 @@ func streamDispatch(c *gin.Context, ctx context.Context, sess *billing.Session, 
 			return false
 		}
 		releaseSession(c, sess, res.StatusCode, cand, "", start, cm.errMsg, cm)
-		gateway.FailDef(c, errs.ServiceUnavailable.WithMessage(fmt.Sprintf(
-			"服务暂时不可用（HTTP %d），本次未扣费，请稍后重试", res.StatusCode)))
+		if !failUpstreamCaller(c, res.StatusCode) {
+			gateway.FailDef(c, errs.ServiceUnavailable.WithMessage(fmt.Sprintf(
+				"服务暂时不可用（HTTP %d），本次未扣费，请稍后重试", res.StatusCode)))
+		}
 		return true
 	}
 	if res.ErrorMsg != "" {
@@ -1881,8 +1908,10 @@ func streamForwardDispatch(c *gin.Context, ctx context.Context, sess *billing.Se
 			return false
 		}
 		releaseSession(c, sess, res.StatusCode, cand, "", start, cm.errMsg, cm)
-		gateway.FailDef(c, errs.ServiceUnavailable.WithMessage(fmt.Sprintf(
-			"服务暂时不可用（HTTP %d），本次未扣费，请稍后重试", res.StatusCode)))
+		if !failUpstreamCaller(c, res.StatusCode) {
+			gateway.FailDef(c, errs.ServiceUnavailable.WithMessage(fmt.Sprintf(
+				"服务暂时不可用（HTTP %d），本次未扣费，请稍后重试", res.StatusCode)))
+		}
 		return true
 	}
 
@@ -2134,8 +2163,10 @@ func streamImageDispatch(c *gin.Context, ctx context.Context, sess *billing.Sess
 				return false
 			}
 			releaseSession(c, sess, res.StatusCode, cand, "", start, cm.errMsg, cm)
-			gateway.FailDef(c, errs.ServiceUnavailable.WithMessage(fmt.Sprintf(
-				"服务暂时不可用（HTTP %d），本次未扣费，请稍后重试", res.StatusCode)))
+			if !failUpstreamCaller(c, res.StatusCode) {
+				gateway.FailDef(c, errs.ServiceUnavailable.WithMessage(fmt.Sprintf(
+					"服务暂时不可用（HTTP %d），本次未扣费，请稍后重试", res.StatusCode)))
+			}
 			return true
 		}
 		// 网络层错误（连接/超时/上游体超限）：记一次上游失败，交给 failover。

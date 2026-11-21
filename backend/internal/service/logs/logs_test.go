@@ -1,6 +1,7 @@
 package logs
 
 import (
+	"encoding/json"
 	"strings"
 	"testing"
 	"time"
@@ -95,15 +96,18 @@ func TestWhereFiltersChannelKeyID(t *testing.T) {
 
 // TestCSVColumnsFrozen 导出列契约（E5）逐列冻结：表头与数据行列数一致。
 //
-// 表头已按设计文档 §4.9.9 的 E5 冻结契约补齐到 22 列（v2.0 起生效）：
+// 表头已按设计文档 §4.9.9 的 E5 冻结契约补齐（v2.0 起 23 列）：
 // 原先只有 13 列，缺少各 token 通道、HTTP 状态、请求号等排障必需项，
 // 导出后仍要回页面逐条点开才能定位问题。
+//
+// 2026-11 追加「应用ID/应用」两列 → 25 列。**只追加在尾部**：
+// 按索引取列的旧对账脚本不受影响，插在中间就是静默错列。
 func TestCSVColumnsFrozen(t *testing.T) {
 	// 表头已去 USD 后缀 + 新增「币种」列（W18 破坏性变更）：
 	// 一列金额在多币种下可能是 ¥ 也可能是 $，表头写死 USD 等于让文件撒谎。
 	const header = "时间,用户,密钥名,模型,模态,事件类型,状态,HTTP," +
 		"输入tok,输出tok,缓存tok,图片tok,音频入tok,音频出tok," +
-		"渠道,分组,耗时ms,费用,成本,币种,请求ID,上游请求ID,IP"
+		"渠道,分组,耗时ms,费用,成本,币种,请求ID,上游请求ID,IP,应用ID,应用"
 	items := []Item{{
 		CreatedAt: time.Date(2026, 10, 20, 12, 0, 0, 0, time.Local),
 		Username:  "admin", KeyName: "默认KEY", Model: "gpt-4o-mini", ChannelName: "OpenAI",
@@ -124,6 +128,10 @@ func TestCSVColumnsFrozen(t *testing.T) {
 	if !strings.Contains(lines[1], ",0.250000,0.000000,USD,") {
 		t.Fatalf("金额/币种列换算错误: %s", lines[1])
 	}
+	// 尾部两列：app_id=0 时必须写「平台直连」，空白会被 Excel 读成"缺字段"。
+	if !strings.HasSuffix(lines[1], ",0,平台直连") {
+		t.Fatalf("应用列应为 0/平台直连，实际行尾：%s", lines[1])
+	}
 }
 
 // TestCSVEscaping 逗号/引号/换行的单元格做整体加引号转义。
@@ -136,5 +144,43 @@ func TestCSVEscaping(t *testing.T) {
 	}
 	if got := Esc("plain"); got != "plain" {
 		t.Errorf("普通文本不应加引号: %s", got)
+	}
+}
+
+// TestWhereFiltersByApp 应用筛选条件必须只在 AppScoped 时出现。
+//
+// 两条都要断：① scoped 时条件进了 WHERE 且参数顺序正确；
+// ② 未 scoped 时**不能**出现 —— 否则门户/默认列表会莫名其妙只看平台直连。
+func TestWhereFiltersByApp(t *testing.T) {
+	cond, args := where(Filter{AppScoped: true, AppID: 7})
+	const want = "key_id IN (SELECT id FROM api_keys WHERE app_id = ?)"
+	if !strings.Contains(cond, want) {
+		t.Fatalf("缺少应用条件: %q", cond)
+	}
+	if len(args) != 1 || args[0] != uint64(7) {
+		t.Fatalf("应用条件参数错误: %v", args)
+	}
+
+	if cond, _ := where(Filter{AppID: 7}); strings.Contains(cond, "api_keys") {
+		t.Fatalf("AppScoped=false 时不应出现应用条件: %q", cond)
+	}
+	if cond, _ := where(Filter{}); cond != "" {
+		t.Fatalf("空筛选必须产出空条件（否则 COUNT 与 SELECT 的拼接会多一个 AND）: %q", cond)
+	}
+}
+
+// TestPortalItemHasNoAppAttribution 门户投影不得下发应用归属字段。
+//
+// 结构上本来就挡住了（PortalItemOf 是逐字段白名单，不拷贝 Item），
+// 这条用例是"以后有人图省事直接返回 Item"的守门：应用归属属于管理台口径，
+// 终端看到的应该是自己的密钥，而不是我们在后台怎么给数据归类。
+func TestPortalItemHasNoAppAttribution(t *testing.T) {
+	it := PortalItemOf(Item{ID: 1, AppID: 5, AppName: "官网门户"}, "", 0, 0, 0)
+	raw, err := json.Marshal(it)
+	if err != nil {
+		t.Fatalf("序列化失败: %v", err)
+	}
+	if strings.Contains(string(raw), "app_id") || strings.Contains(string(raw), "app_name") {
+		t.Fatalf("门户调用记录不应下发应用归属: %s", raw)
 	}
 }

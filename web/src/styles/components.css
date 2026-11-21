@@ -715,7 +715,7 @@ h3 {
   padding-left: 10px;
   border-left: 1px solid var(--border);
 }
-/* 折叠只加类、不移除节点：nav a 恒 18 条（计数断言与跳转后高亮都依赖它） */
+/* 折叠只加类、不移除节点：nav a 恒 15 条（计数断言与跳转后高亮都依赖它） */
 .a-side .nav-items.is-collapsed {
   display: none;
 }
@@ -1012,7 +1012,7 @@ h3 {
   gap: 14px;
   grid-template-columns: repeat(4, 1fr);
 }
-/* ---- 接入应用卡片列表（/admin/apps）----
+/* ---- 应用管理卡片列表（/admin/apps）----
    管理台唯一的「数据卡片列表」：每个应用一张卡，配置进弹窗。
    栅格用 minmax(0,1fr) 而不是 1fr：长 slug / 长版本号会把列撑破。 */
 .app-grid {
@@ -1164,35 +1164,142 @@ h3 {
   overflow: hidden;
   text-overflow: ellipsis;
 }
-/* 在线页签的状态大卡 */
-.app-status-hero {
+/* ---------- 应用概览（名片 + 运行态 + 两栏） ----------
+   「在线」页签并入概览后（2026-11-20），这一段是概览页的全部版式：
+   名片 → 四格指标 → （趋势图 | 运行态）→ 维护 → 应用状态。 */
+.app-hero {
+  display: flex;
+  align-items: flex-start;
+  gap: 14px;
+  padding: 16px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  background: var(--card);
+}
+/* min-width:0 必须有：应用名/说明是长文本，flex:1 的默认 min-width:auto
+   会让它撑宽整行（弹窗宽度定死，多出来的部分直接顶出滚动容器）。 */
+.app-hero__main {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+.app-hero__name {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.app-hero__title {
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--t1);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 100%;
+}
+/* 分隔不用「·」字符：窄屏折行时它会孤零零挂在行尾。改为纯间距 ——
+   slug 是等宽字体、后两项是正文，本来就分得开。 */
+.app-hero__meta {
+  display: flex;
+  align-items: center;
+  gap: 4px 12px;
+  flex-wrap: wrap;
+  font-size: 12px;
+  color: var(--t3);
+}
+.app-hero__desc {
+  font-size: 13px;
+  color: var(--t2);
+  overflow-wrap: anywhere;
+}
+.app-hero__acts {
+  display: flex;
+  gap: 8px;
+  flex: none;
+  flex-wrap: wrap;
+}
+/* 左=走势、右=当下。用 minmax(0,·) 而不是 1.7fr/1fr：`fr` 的最小尺寸是 auto，
+   图表 svg 的固有宽度会把右栏挤扁（与 .form-grid--3 同一个坑）。 */
+.app-overview-cols {
+  display: grid;
+  grid-template-columns: minmax(0, 1.7fr) minmax(0, 1fr);
+  gap: var(--gap-lg);
+  align-items: start;
+}
+/* 运行态指标行：标签左、等宽数值右，逐行底部分隔线。 */
+.run-list {
+  display: flex;
+  flex-direction: column;
+}
+.run-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 9px 0;
+  border-bottom: 1px dashed var(--border);
+}
+.run-row:last-child {
+  border-bottom: none;
+  padding-bottom: 0;
+}
+.run-row__lbl {
+  font-size: 12.5px;
+  color: var(--t3);
+  white-space: nowrap;
+}
+.run-row__val {
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--t1);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+.run-row__sub {
+  margin-left: 6px;
+  font-size: 11.5px;
+  font-weight: 400;
+  color: var(--t3);
+}
+/* 应用状态（危险操作）：说明占满，按钮靠右；窄屏换行不挤成一团。 */
+.app-danger-row {
   display: flex;
   align-items: center;
   gap: 12px;
-  padding: 14px 16px;
-  border: 1px solid var(--border);
-  border-radius: var(--r-md);
+  flex-wrap: wrap;
 }
-.app-status-hero .dot {
-  width: 9px;
-  height: 9px;
-  border-radius: 50%;
-  flex: none;
-  background: var(--t3);
-}
-.app-status-hero .dot.online {
-  background: var(--success);
-}
-.app-status-hero .dot.idle {
-  background: var(--warning);
-}
-.app-status-hero .main {
-  flex: 1;
+.app-danger-row__txt {
+  flex: 1 1 260px;
   min-width: 0;
+  font-size: 12.5px;
+  color: var(--t3);
 }
-.app-status-hero .title {
-  font-size: 14px;
-  font-weight: 500;
+@media (max-width: 1023px) {
+  .app-overview-cols {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+@media (max-width: 767px) {
+  .app-hero {
+    flex-wrap: wrap;
+  }
+  .app-hero__acts {
+    width: 100%;
+  }
+  .app-hero__acts .btn {
+    flex: 1 1 auto;
+  }
+}
+/* 编辑应用信息（440px，≤767 变整屏 Sheet）：两列在 375px 下每格只剩 ~150px，
+   长 slug 会被截、名字也难改 —— 窄屏收回单列。只作用于本弹窗：
+   `.form-grid` 是全局栅格，别的弹窗有各自的取舍。 */
+@media (max-width: 767px) {
+  .dialog.app-edit-dialog .form-grid {
+    grid-template-columns: 1fr;
+  }
 }
 .maintenance-box {
   display: flex;
@@ -2226,6 +2333,15 @@ textarea {
 }
 .dialog .dl-head .dl-title {
   min-width: 0;
+}
+/* 顶栏附加区（导航/页签）：占满标题与关闭之间的剩余宽度。
+   必须给 min-width:0，否则里面的 nowrap 页签条会把 `.dl-head` 顶宽，
+   而 `.dialog` 只有 max-width、没有 overflow —— 直接溢到边框外。 */
+.dialog .dl-head__extra {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  justify-content: flex-start;
 }
 /* 弹窗右上角关闭（默认不渲染，只有显式 closeButton 才出现） */
 .dialog .dl-close {
@@ -5866,14 +5982,21 @@ textarea.src {
     white-space: nowrap;
   }
 }
-/* 应用管理弹窗（五页签）。
+/* 应用管理弹窗（概览/品牌/公告/版本 + 插件）。
    定高理由同 .acct-dialog：.dialog 是 fixed + translate 的自高度盒，没有 height
    也没有 height 过渡，页签内容高差 Δ 会被摊成上下各 Δ/2（概览带图表≈790、
    公告只有一行时≈180，一跳就是几百像素）。
    这里把滚动下沉到当前页签的 .tab-panel，页签条留在滚动容器之外 ——
    切页签、滚内容都不动外壳，因此也不需要给页签条写 sticky。
    width 与 max-width、height 与 max-height 必须成对写：只写一半，
-   另一半会被 .dialog 的 92vw / min(86vh,720px) 接回去。 */
+   另一半会被 .dialog 的 92vw / min(86vh,720px) 接回去。
+
+   ⚠️ 下面所有规则**必须用直接子选择器**（`> .dl-head` / `> .dl-body`），
+   不能写 `.dialog.app-manage-dialog .dl-body`。编辑应用信息的弹窗就挂在
+   本弹窗的 `.dl-body` **里面**（Dialog 不传 portal ⇒ 内联渲染），后代写法会把
+   `padding:0`、`overflow:hidden`、`padding:0 20px` 一起套到子弹窗上：
+   表现为标题贴顶被裁、内容贴边、表单错位 —— 而且看上去像"表单组件坏了"。
+   2026-11-20 就是这么坏过一次。 */
 .dialog.app-manage-dialog {
   width: min(1080px, 92vw);
   max-width: min(1080px, 92vw);
@@ -5881,23 +6004,126 @@ textarea.src {
   max-height: min(88vh, 780px);
 }
 /* 内容区不再自己滚，交给当前页签（同 .acct-dialog .dl-body）。
-   刻意不写 height:100%：那等于赌 flex item 的 used height 对子元素按 definite 解析。 */
-.dialog.app-manage-dialog .dl-body {
+   刻意不写 height:100%：那等于赌 flex item 的 used height 对子元素按 definite 解析。
+
+   padding:0 是**滚动条贴边**的前提（2026-11 整改）：内边距原来挂在这一层，
+   而滚动发生在它内部的 .page-tabs > .tab-panel —— 滚动条于是悬在距外壳 20px 处，
+   上下还各短 20px。现在 padding 下沉到滚动容器自身（下一条规则），
+   轨道右缘就落在外壳内沿。
+   注意：这条 (0,3,0) 会一并压掉 ≤767 的 `.dialog .dl-body{padding-bottom:env(...)}`
+   —— safe-area 必须在下面的媒体查询里补回，否则 iOS 上 home indicator 会压住内容。 */
+.dialog.app-manage-dialog > .dl-body {
   display: flex;
   flex-direction: column;
   overflow: hidden;
+  padding: 0;
 }
-.dialog.app-manage-dialog .page-tabs {
+.dialog.app-manage-dialog > .dl-body > .page-tabs {
   flex: 1 1 auto;
   min-height: 0;
 }
 /* 直系选择器：各页签组件内部还有一层同名 .tab-panel（BrandTab/NoticesTab…），
-   一起变成滚容器就是嵌套滚动。overscroll-behavior 防滚动链把页面带走。 */
-.dialog.app-manage-dialog .page-tabs > .tab-panel {
+   一起变成滚容器就是嵌套滚动。overscroll-behavior 防滚动链把页面带走。
+
+   padding 在这里而不是 .dl-body：滚动容器的 padding-box 就是滚动条的落点，
+   写在滚动容器上 = 内容内缩、条贴边；写在外层 = 条跟着内容一起内缩。
+   底部圆角是为了 thumb 在弹窗圆角处不探出圆弧（.dialog 没有 overflow:hidden）。
+   前提：全局 box-sizing:border-box（Tailwind preflight），删掉它这里会破版。 */
+.dialog.app-manage-dialog > .dl-body > .page-tabs > .tab-panel {
   flex: 1 1 auto;
   min-height: 0;
   overflow-y: auto;
   overscroll-behavior: contain;
+  padding: 20px;
+  border-radius: 0 0 calc(var(--r-lg) - 1px) calc(var(--r-lg) - 1px);
+}
+/* 顶栏：**没有标题**，只有下划线页签 + 关闭，恒为一行。
+   垂直内边距归零 —— 顶栏高度就是页签高度，2px 选中线才能正好压在自己的
+   border-bottom 上（留 padding-bottom 的话下划线会浮在半空，像条无主的横线）。 */
+.dialog.app-manage-dialog > .dl-head {
+  padding: 0 20px;
+  gap: 12px;
+  align-items: stretch;
+}
+/* 关闭按钮：交叉轴 stretch 对定高元素不生效（会落到 flex-start），必须显式居中，
+   否则 X 浮在顶栏左上角。 */
+.dialog.app-manage-dialog > .dl-head > .dl-close {
+  align-self: center;
+}
+/* 页签条：宽度由容器给（占满 + 收缩 + overflow-x），绝不参与撑宽顶栏。
+   **必须 `flex:1 1 auto` 而不是 `0 1 auto`**：只有页签条自己拿到整行宽度，
+   `tab--pin` 的 `margin-left:auto` 才有空位可占 —— 否则它按内容收缩，
+   那条 auto 恒为 0，「插件」就紧跟在最后一个数据页签后面，靠不到最右。
+   分隔线只有顶上那一条（.dl-head 的 border-bottom），这里不能再画一条。
+   mask-image 是 ≤1023 那条 `.tabs,.pill-tabs` 规则留下的，在这里必须中和：
+   渐隐会把最后一个页签吃掉，像是渲染坏了。 */
+.dialog.app-manage-dialog > .dl-head .tabs {
+  flex: 1 1 auto;
+  min-width: 0;
+  max-width: 100%;
+  flex-wrap: nowrap;
+  overflow-x: auto;
+  align-items: flex-end;
+  gap: 2px;
+  margin-bottom: 0;
+  border-bottom: none;
+  mask-image: none;
+  -webkit-mask-image: none;
+  /* 刻意不留 padding-right：`tab--pin` 靠 `margin-left:auto` 顶到**内容盒**右缘，
+     一有右内边距，最右页签就会离页签条右缘差那几个像素，
+     「插件恒靠最右」在几何上就不成立了（e2e 按 ≤2px 量）。 */
+}
+/* 页签：贴底 + 2px 下划线（全局 `.tabs .tab` 的 border-bottom 已是 transparent/2px）。
+   全局的 `margin-bottom:-1px` 是给「容器自带 border-bottom」那套用法准备的；
+   这里容器无边框且 overflow:auto —— 留着这 1px 会探出滚动容器，
+   桌面浏览器上会长出一条竖向滚动条。 */
+.dialog.app-manage-dialog > .dl-head .tabs .tab {
+  padding: 13px 12px 11px;
+  margin-bottom: 0;
+  border-bottom-width: 2px;
+}
+/* 首个页签不吃左内边距：顶栏没有标题，页签文字必须和下面面板内容的左缘对齐
+   （20px），否则整条页签会整体右移 12px，看起来像没对齐。 */
+.dialog.app-manage-dialog > .dl-head .tabs .tab:first-child {
+  padding-left: 0;
+}
+/* 「插件」清单页签恒靠最右（`PLUGINS_TAB` 永远排在数组最后）。
+   还有空位时被 auto 顶到页签条右缘，装了几个插件都不动位置；
+   内容超宽时 auto 退化成 0（紧贴前一项），不会跑到可视区之外。 */
+.dialog.app-manage-dialog > .dl-head .tabs .tab--pin {
+  margin-left: auto;
+}
+/* outOfFilter 的常驻提示在滚动容器之外：不随内容滚，也不贴死两侧。
+   （挪进面板会变成"滚到顶才看得见"，那是语义倒退。） */
+.dialog.app-manage-dialog > .dl-body > .alert-banner {
+  margin: 16px 20px 0;
+}
+@media (max-width: 767px) {
+  /* ≤767 弹窗变底部 Sheet：顶部内边距是给抓手条让位的（components.css 的
+     `.dialog .dl-head{padding-top:22px}` 是 (0,2,0)，会被上面 (0,3,0) 的简写覆盖，
+     所以必须在本块里用同特异性重写一次）。底部仍是 0：下划线压在顶栏分隔线上。
+     左边距对齐面板内容（20px），右侧留给关闭按钮（它自带 -6px 负边距）。 */
+  .dialog.app-manage-dialog > .dl-head {
+    padding: 18px 12px 0 20px;
+  }
+  /* 同分同选择器、块内更靠后 ⇒ 这条胜出（safe-area 只在手机上存在） */
+  .dialog.app-manage-dialog > .dl-body > .page-tabs > .tab-panel {
+    padding-bottom: calc(20px + env(safe-area-inset-bottom, 0px));
+  }
+  /* 概览动作行里 Tag + 多个按钮在 375px 下会超过可用宽度，`.btn` 是 nowrap 不会自己缩。
+     只在本弹窗放开换行，不动全局 .ph-acts。 */
+  .dialog.app-manage-dialog > .dl-body > .page-tabs > .tab-panel .ph-acts {
+    flex-wrap: wrap;
+  }
+}
+/* 插件页签的文案来自 manifest 的 name（最长 64 字）：不收敛会把整条页签条撑到
+   需要横滚好几屏，找「插件」清单都难。只截断**显示**，可访问名仍是全名
+   （Tabs 的 aria-label 取 label 原文）。只作用于顶栏页签，不碰面板内容里的文字。 */
+.dialog.app-manage-dialog > .dl-head .tab__txt {
+  max-width: 9em;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 /* ≤767：仍是底部 Sheet，高度 92dvh（前者 vh 回退，dvh 修 iOS 地址栏）。
    width / max-width 必须一起回到 100%：上面 0,2,0 的 min(1080px,92vw) 会压过
@@ -7578,6 +7804,27 @@ details.faq summary {
 .esel:disabled {
   cursor: not-allowed;
   opacity: 0.55;
+}
+/* 可搜索实体下拉（searchable）：外观与 .esel 完全一致，内部换成无边框输入框。
+   触发器就是输入框本身 —— 焦点永远落在**页面内**，而不是 portal 出去的面板里；
+   后者会被弹窗的焦点环与移动端 Sheet 抢走（Popover 的注释记的就是这个坑）。
+   边框/圆角/焦点环沿用 .esel，这里只把"按钮"还原成"输入框"。 */
+.esel--search {
+  cursor: text;
+}
+.esel-input {
+  flex: 1 1 auto;
+  min-width: 0;
+  height: 100%;
+  padding: 0;
+  border: none;
+  background: none;
+  color: inherit;
+  font: inherit;
+  outline: none;
+}
+.esel-input::placeholder {
+  color: var(--t3);
 }
 .esel .ent-cell {
   flex: 1 1 auto;

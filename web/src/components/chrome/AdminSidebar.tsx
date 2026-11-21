@@ -40,13 +40,13 @@ export interface AdminSidebarProps {
  * 两层同名读屏会念两遍还分不清谁是谁。
  *
  * 分组折叠（≤1279px 也生效，与抽屉无关）：默认全展开，收起状态写 localStorage；
- * 折叠只加 `.is-collapsed{display:none}` 类、**不移除节点** —— 18 条 `nav a` 是
+ * 折叠只加 `.is-collapsed{display:none}` 类、**不移除节点** —— 15 条 `nav a` 是
  * 全站 10 处断言的基座，删了节点一半 e2e 直接红。
  *
  * 层级（组头 vs 子项）只由结构与字重表达，**不靠缩小字号**：组头是 `.nav-group`
  * （600 字重、可折叠），子项装在 `.nav-sub` 里（缩进 + 1px 导轨），两者的行骨架
- * `.nav-row` 共用同一套度量。顶级项（无标题分区）**不进 `.nav-sub`**，否则「仪表盘」
- * 这种一级入口会被当成某组的子项缩进进去。
+ * `.nav-row` 共用同一套度量。顶级项（无标题分区：仪表盘 / 系统配置 / 模型服务 /
+ * 用户管理 / 应用管理）**不进 `.nav-sub`**，否则这些一级入口会被当成某组的子项缩进进去。
  */
 export function AdminSidebar({ open, onClose }: AdminSidebarProps) {
   const { pathname } = useLocation();
@@ -144,7 +144,7 @@ export function AdminSidebar({ open, onClose }: AdminSidebarProps) {
                   </button>
                 ) : null}
 
-                {/* 折叠只加类、不移除节点：nav a 恒 18 条（计数断言与跳转后高亮都依赖它）。
+                {/* 折叠只加类、不移除节点：nav a 恒 15 条（计数断言与跳转后高亮都依赖它）。
                     `.nav-sub` 只给**有组标题**的分区：顶级项是同级入口，不能缩进成别人的子项。 */}
                 <div
                   id={itemsId}
@@ -155,8 +155,8 @@ export function AdminSidebar({ open, onClose }: AdminSidebarProps) {
                   )}
                 >
                   {section.items.map((item) => {
-                    // 前缀匹配：插件页 /admin/apps/2/p/ticket 要落在「接入应用」上，
-                    // 否则从插件页进来侧栏一片无高亮（看起来像页面不属于管理台）。
+                    // 前缀匹配：子路径页面（如带查询参数之外的运行期深链）要落在
+                    // 所属分区上，否则从那里进来侧栏一片无高亮（看起来像不属于管理台）。
                     const active = matchPath(item.path, pathname);
                     return (
                       <Link

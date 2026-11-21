@@ -526,9 +526,14 @@ type ListFilter struct {
 	Model    string
 	Modality string
 	UserID   uint64
-	Page     int
-	PageSize int
-	After    uint64
+	// AppID / AppScoped 按「任务归属的应用」过滤。
+	// 归因链 tasks.key_id → api_keys.app_id（appref 是唯一派生点），不落冗余列。
+	// AppScoped 让「只看平台直连（app_id=0）」可表达 —— 缺了它，0 只能当「没传」。
+	AppID     uint64
+	AppScoped bool
+	Page      int
+	PageSize  int
+	After     uint64
 	// OrderBy 是已过白名单校验的 ORDER BY 片段（空 = 历史默认 `id DESC`）。
 	//
 	// 只认"能安全拼进 SQL 的片段"：对外字段名到列的映射与白名单校验都在 handler
@@ -1148,15 +1153,6 @@ func hasInputRefType(refs []any, typ string) bool {
 		}
 	}
 	return false
-}
-
-// MetadataOf 从任务参数快照提取透传的 metadata（D3：对齐 new-api 响应模型）。
-func MetadataOf(t *model.Task) map[string]any {
-	var p struct {
-		Metadata map[string]any `json:"metadata"`
-	}
-	_ = json.Unmarshal(t.RequestParams, &p)
-	return p.Metadata
 }
 
 // endpointLabelOf 生成「跳过渠道」文案里的端点名。
@@ -4046,6 +4042,11 @@ func List(ctx context.Context, scope Scope, f ListFilter) ([]model.Task, int64, 
 		q := scope.applyScope(db.DB.WithContext(ctx).Model(&model.Task{}))
 		if f.UserID != 0 {
 			q = q.Where("user_id = ?", f.UserID)
+		}
+		if f.AppScoped {
+			// 归因链 tasks.key_id → api_keys.app_id。子查询而不是 JOIN：
+			// Count 与 Find 共用 build()，JOIN 会让两者都要多一份去重顾虑。
+			q = q.Where("key_id IN (SELECT id FROM api_keys WHERE app_id = ?)", f.AppID)
 		}
 		if f.Status != "" {
 			q = q.Where("status = ?", f.Status)

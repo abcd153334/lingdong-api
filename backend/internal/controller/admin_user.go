@@ -99,6 +99,27 @@ func AdminListUsers(c *gin.Context) {
 		}
 		q = q.Where("status = ?", n)
 	}
+	// 按应用筛「在该应用下持有托管密钥的用户」。
+	//
+	// 用户是全局池（model.User 没有 app_id）：一个用户可以同时在多个应用下
+	// 各持 1 把 hosted 密钥，所以这里筛的是**持有关系**，不是归属。
+	// 三个条件都不能少：kind='hosted'（用户自建密钥 app_id 恒 0，不代表任何应用）、
+	// deleted_at IS NULL（语义是「当前仍持有」，已删密钥不该让用户继续出现在该应用下）。
+	appID, appScoped, aok := appScopeQuery(c)
+	if !aok {
+		response.FailDef(c, errs.InvalidParam)
+		return
+	}
+	if appScoped {
+		if appID == 0 {
+			// 不存在「属于平台直连的用户」这种身份。返回全量等于把参数吞掉，
+			// 返回空集合又是一句谎 —— 只有拒绝才是诚实的。
+			response.FailDef(c, errs.InvalidParam.WithMessage("用户列表不支持按「平台直连」筛选"))
+			return
+		}
+		q = q.Where("id IN (SELECT user_id FROM api_keys WHERE app_id = ? AND kind = ? AND deleted_at IS NULL)",
+			appID, model.KeyKindHosted)
+	}
 
 	var total int64
 	if err := q.Count(&total).Error; err != nil {

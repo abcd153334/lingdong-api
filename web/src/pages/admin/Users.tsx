@@ -15,6 +15,7 @@ import { Select } from "@/components/common/Select";
 import { StatusTag } from "@/components/common/StatusTag";
 import {
   useAdminAdjustQuotaMutation,
+  useAdminAppOptionsQuery,
   useAdminLogsQuery,
   useAdminUpdateUserMutation,
   useAdminUserKeysQuery,
@@ -24,17 +25,32 @@ import {
   type AdminUsersParams,
 } from "@/lib/api";
 import { ApiError, DEFAULT_PAGE_SIZE } from "@/lib/apiClient";
+import { appFilterField, appIdParam } from "@/lib/appFilter";
 import { TRANSACTION_LABELS, formatDateTime } from "@/lib/format";
 import { createAdjustQuotaSchema } from "@/lib/schemas";
 import { actionsCol } from "@/lib/table";
 import { cn } from "@/lib/utils";
 import { currentSymbol, groupDiscountText, microOf, microToInput, money2, moneyOf, otherMoneyOf } from "@/lib/money";
-import type { AdminLogItem, AdminUserKeyItem, AdminUserRow, TransactionItem } from "@/types";
+import type {
+  AdminAppOption,
+  AdminLogItem,
+  AdminUserKeyItem,
+  AdminUserRow,
+  TransactionItem,
+} from "@/types";
 
-const EMPTY_FILTERS: Record<string, string> = { fKw: "", fGroup: "", fStatus: "" };
+const EMPTY_FILTERS: Record<string, string> = { fKw: "", fGroup: "", fStatus: "", fApp: "" };
 
-/** 筛选字段：分组集合来自门户配置（S18），随配置热更新 */
-const filterFields = (groupKeys: string[]): FilterField[] => [
+/**
+ * 筛选字段：分组集合来自门户配置（S18），随配置热更新。
+ *
+ * 应用筛选的语义是「在该应用下持有托管密钥」——**不是**归属：用户是全局池，
+ * 同一个人可以同时在多个应用下各持 1 把密钥。因此这一页不显示「所属应用」列
+ * （见页面注释），筛选是唯一的正确表达。
+ */
+const filterFields = (groupKeys: string[], appItems: AdminAppOption[]): FilterField[] => [
+  // withDirect=false：不存在「属于平台直连的用户」，后端会对 app_id=0 直接 400。
+  appFilterField(appItems, { withDirect: false }),
   { t: "search", id: "fKw", label: "关键词", placeholder: "用户名关键词" },
   { t: "select", id: "fGroup", label: "分组", allLabel: "全部分组", items: groupKeys },
   { t: "select", id: "fStatus", label: "状态", allLabel: "全部状态", items: [[1, "启用"], [2, "禁用"]] },
@@ -397,6 +413,8 @@ export function AdminUsersPage() {
   const cfg = useAdminConfigQuery();
   const groupDiscounts = cfg.data?.config?.group_discount ?? { default: 1 };
   const groupKeys = Object.keys(groupDiscounts);
+  // 应用选项与「插件」清单同源（/admin/apps/options），四个列表页共用一份缓存。
+  const appOpts = useAdminAppOptionsQuery();
   const discountOf = (g: string) => groupDiscountText(groupDiscounts[g]);
   const [page, setPage] = useState(1);
   const [filters, setFilters] = useState<Record<string, string>>(EMPTY_FILTERS);
@@ -412,6 +430,7 @@ export function AdminUsersPage() {
     keyword: filters.fKw.trim() || undefined,
     group: filters.fGroup || undefined,
     status: statusFilter,
+    app_id: appIdParam(filters.fApp),
   };
   const query = useAdminUsersQuery(params);
   const users = query.data?.items ?? [];
@@ -551,7 +570,7 @@ export function AdminUsersPage() {
       <PageHead title="用户管理" desc="余额调账、状态管控与密码重置" />
 
       <FilterBar
-        fields={filterFields(groupKeys)}
+        fields={filterFields(groupKeys, appOpts.items)}
         value={filters}
         onChange={onFilterChange}
         onReset={onFilterReset}

@@ -51,7 +51,13 @@ interface GenerateResult {
 }
 
 /** 兑换码管理（S16 §4.3）：批量生成 + 列表筛选 + 批量作废 + 结果导出。
- * 状态一律取后端派生值（redeem.StatusOf），页面不做二次推导。 */
+ * 状态一律取后端派生值（redeem.StatusOf），页面不做二次推导。
+ *
+ * **为什么这一页没有「所属应用」列/筛选**（2026-11 明确）：兑换码是平台级营销
+ * 工具 —— 核销入账的是 users.balance（用户全局余额），与订单/用量不同源。
+ * 同一张码可被任意应用下的任意用户兑换，事后没有客观载体能反推"它属于哪个应用"。
+ * 硬加一个 app_id 只会造出「统计上像应用专属、资金上仍是全局」的假维度。
+ * 若将来确需，唯一可行是记录核销时命中的密钥（表结构变更，产品需求驱动）。 */
 export function AdminRedeemsPage() {
   const cfg = useAdminConfigQuery();
   const [page, setPage] = useState(1);

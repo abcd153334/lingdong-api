@@ -43,7 +43,6 @@ import { AdminConfigPage } from "@/pages/admin/Config";
 import { AdminAuditPage } from "@/pages/admin/Audit";
 import { AdminAuthEventsPage } from "@/pages/admin/AuthEvents";
 import { AdminAppsPage } from "@/pages/admin/Apps";
-import { AdminAppPluginPage } from "@/pages/admin/AppPlugin";
 import { AdminApiDocsPage } from "@/pages/admin/ApiDocs";
 
 /* ============================================================
@@ -365,25 +364,11 @@ const adminAuthEventsRoute = createRoute({
   path: "/admin/auth-events",
   component: AdminAuthEventsPage,
 });
-/** 接入应用（对外 API 的归属主体：密钥、订单、消费按应用归因） */
+/** 应用管理（对外 API 的归属主体：密钥、订单、消费按应用归因） */
 const adminAppsRoute = createRoute({
   getParentRoute: () => adminRoute,
   path: "/admin/apps",
   component: AdminAppsPage,
-});
-/**
- * 插件页面（泛化路由）。
- *
- * 为什么是一条带参数的路由，而不是给每个插件注册一条：插件是运行期导入的，
- * 静态注册做不到；而动态页签会撞 `switch default 静默回落`、
- * `PanelStack.seen 只增不减`、`idPrefix 必须字面量` 三处（见 AppManageDialog 注释）。
- *
- * 它不进侧栏：面包屑与高亮靠 `lib/nav.ts` 的**最长前缀匹配**归到 /admin/apps。
- */
-const adminAppPluginRoute = createRoute({
-  getParentRoute: () => adminRoute,
-  path: "/admin/apps/$id/p/$plugin",
-  component: AdminAppPluginPage,
 });
 /** 开放接口手册（只读：契约与运行期守卫同源，可导出 OpenAPI / Markdown） */
 const adminAccountRoute = createRoute({
@@ -438,7 +423,6 @@ const routeTree = rootRoute.addChildren([
     adminAuditRoute,
     adminAuthEventsRoute,
     adminAppsRoute,
-    adminAppPluginRoute,
     adminApiDocsRoute,
     adminAccountRoute,
   ]),

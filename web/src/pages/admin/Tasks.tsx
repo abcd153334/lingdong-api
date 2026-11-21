@@ -13,6 +13,7 @@ import { ModalityTag, StatusTag } from "@/components/common/StatusTag";
 import { actionsCol } from "@/lib/table";
 import { TaskProgress } from "@/components/common/TaskProgress";
 import {
+  useAdminAppOptionsQuery,
   useAdminTaskQuery,
   useAdminTasksQuery,
   useCancelAdminTaskMutation,
@@ -20,9 +21,10 @@ import {
   type AdminTasksParams,
 } from "@/lib/api";
 import { ApiError, DEFAULT_PAGE_SIZE } from "@/lib/apiClient";
+import { appFilterField, appIdParam } from "@/lib/appFilter";
 import { formatDateTime } from "@/lib/format";
 import { isActiveTask } from "@/lib/task";
-import type { AdminTaskItem } from "@/types";
+import type { AdminAppOption, AdminTaskItem } from "@/types";
 
 const EMPTY_FILTERS: Record<string, string> = { fStatus: "" };
 
@@ -36,7 +38,9 @@ const STATUS_ITEMS: [string, string][] = [
   ["expired", "已过期"],
 ];
 
-const FILTER_FIELDS: FilterField[] = [
+/** 筛选项：应用 / 状态。应用在最前，与订单/日志同序。 */
+const filterFields = (appItems: AdminAppOption[]): FilterField[] => [
+  appFilterField(appItems),
   { t: "select", id: "fStatus", label: "状态", allLabel: "全部状态", items: STATUS_ITEMS },
 ];
 
@@ -66,10 +70,13 @@ export function AdminTasksPage() {
   // 详情未到时先用列表行渲染摘要与任务信息，避免打开瞬间的空窗。
   const current = detailQ.data ?? detail;
 
+  // 应用选项（/admin/apps/options，四个列表页共用一份缓存）。
+  const appOpts = useAdminAppOptionsQuery();
   const params: AdminTasksParams = {
     page,
     page_size: DEFAULT_PAGE_SIZE,
     status: filters.fStatus || undefined,
+    app_id: appIdParam(filters.fApp),
   };
   const query = useAdminTasksQuery(params);
   const items = query.data?.items ?? [];
@@ -162,6 +169,20 @@ export function AdminTasksPage() {
       cell: ({ row }) => <span className="mono small">#{row.original.user_id}</span>,
     },
     {
+      // 应用列：任务归属经 key_id 派生，0 = 平台直连（用户自建密钥）。
+      // 放在「用户」之后：先看是谁，再看属于哪个应用。
+      id: "app",
+      accessorFn: (r) => r.app_name ?? "",
+      enableSorting: false,
+      meta: { label: "应用", priority: 3 },
+      cell: ({ row }) =>
+        row.original.app_id === 0 ? (
+          <span className="small muted">平台直连</span>
+        ) : (
+          <span className="small">{row.original.app_name || "—"}</span>
+        ),
+    },
+    {
       id: "model",
       accessorKey: "model",
       enableSorting: false,
@@ -240,7 +261,7 @@ export function AdminTasksPage() {
       <PageHead title="异步任务" desc="任务进度查看与额度结算" />
 
       <FilterBar
-        fields={FILTER_FIELDS}
+        fields={filterFields(appOpts.items)}
         value={filters}
         onChange={(id, value) => {
           setFilters((f) => ({ ...f, [id]: value }));

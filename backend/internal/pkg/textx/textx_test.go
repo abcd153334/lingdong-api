@@ -59,3 +59,37 @@ func TestSnippet(t *testing.T) {
 		t.Fatalf("500 汉字字节长度应为 1500，实际 %d", len(Snippet([]byte(strings.Repeat("错", 1000)), 500)))
 	}
 }
+
+// TestTruncateRunesRepairsInvalidUTF8 锁住「非法字节不落库」。
+//
+// 历史事故：spec 适配器按字节切片产出非法 UTF-8，写进 usages.error_msg 时
+// PG 报 22021，连带结算/释放事务回滚 —— 冻结永久滞留。
+// 修复不能只改调用点：本包「未超限直接返回 s」的分支会把非法串原样放行，
+// 所以截断函数自己必须先修非法字节。
+func TestTruncateRunesRepairsInvalidUTF8(t *testing.T) {
+	// 把一段合法中文按字节切裂，再拼回字符串（模拟上游报文被 s[:n] 切过）。
+	full := "ab" + strings.Repeat("中文", 80)
+	broken := full[:300] // 300 字节落在多字节字符中间
+	if utf8.ValidString(broken) {
+		t.Fatal("构造的样本仍是合法 UTF-8，用例无效（需调整切点）")
+	}
+
+	for name, fn := range map[string]func(string, int) string{
+		"TruncateRunes":         TruncateRunes,
+		"TruncateRunesEllipsis": TruncateRunesEllipsis,
+	} {
+		// 关键：长度**未超限**时也必须修（这是原实现的漏网分支）。
+		got := fn(broken, 5000)
+		if !utf8.ValidString(got) {
+			t.Fatalf("%s 未超限分支放行了非法 UTF-8: %q", name, got)
+		}
+		// 超限分支同样要合法。
+		got = fn(broken, 10)
+		if !utf8.ValidString(got) {
+			t.Fatalf("%s 超限分支产出非法 UTF-8: %q", name, got)
+		}
+		if n := utf8.RuneCountInString(got); n > 10 {
+			t.Fatalf("%s 截断后 %d 字符，超过 10", name, n)
+		}
+	}
+}

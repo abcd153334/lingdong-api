@@ -392,3 +392,34 @@ test.describe("S20 订单管理 · 管理台（契约级）", () => {
     await expect(page.getByText("订单 LD20261020002 已入账")).toBeVisible();
   });
 });
+
+const APP_OPTIONS_ORDERS = [
+  { id: 5, slug: "web-portal", name: "web-portal", display_name: "官网门户", status: 1 },
+  { id: 9, slug: "shadow", name: "影画", display_name: "", status: 2 },
+];
+
+test.describe("订单管理 · 按应用筛选", () => {
+  test("「平台直连」传 0、某应用传 id；表格出现应用列", async ({ page }) => {
+    await seedAuth(page, { role: 0 });
+    const calls = await stub(page);
+    await page.route("**/api/admin/apps/options**", (route) =>
+      route.fulfill({ json: envelope({ items: APP_OPTIONS_ORDERS, truncated: false }) }),
+    );
+    await page.goto("/admin/orders");
+    await expect(page.locator(".tbl thead")).toContainText("应用");
+
+    // 平台直连 = app_id 0：这是唯一能单独统计"用户自充"的筛选，
+    // 被当成空值吞掉就会静默变成"筛全量"。
+    await page.getByRole("combobox", { name: "应用" }).click();
+    await page.getByRole("option", { name: "平台直连" }).click();
+    await expect
+      .poll(() => calls.some((c) => c.startsWith("GET /api/admin/orders?") && c.includes("app_id=0")))
+      .toBe(true);
+
+    await page.getByRole("combobox", { name: "应用" }).click();
+    await page.getByRole("option", { name: /官网门户/ }).click();
+    await expect
+      .poll(() => calls.some((c) => c.startsWith("GET /api/admin/orders?") && c.includes("app_id=5")))
+      .toBe(true);
+  });
+});

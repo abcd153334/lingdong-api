@@ -202,12 +202,16 @@ Add-Check -Id 'M16' -Name '页面层手写 tab 容器（应为 0，统一走 <Ta
   -Note '锚定完整类名：api-tabs / api-langtabs / tabs-wrap 不在命中范围'
 
 # ---------- M17 L1 页签必须接 usePageTabs（视图开关白名单） ----------
-# 白名单只有 3 个，且都很短、可审计：
+# 白名单只有 4 个，且都很短、可审计：
 #   Dashboard.tsx / Home.tsx —— 区间切换是同一份数据的口径（L2），不该进 URL；
-#   Showcase.tsx             —— 组件展示台，不是业务页。
+#   Showcase.tsx             —— 组件展示台，不是业务页；
+#   AppManageDialog.tsx     —— 应用管理**弹窗内**的视图开关（L2）。为什么也不进 URL：
+#                              弹窗关闭后页签状态没有意义，而给它一条深链等于让同一份
+#                              数据页有两个宿主（弹窗 / 全屏），滚动与返回路径各一份。
+#                              注意：这是**按文件**豁免，该文件以后不得再放 L1 页签。
 $m17 = Find-FileViolations -MustPattern '<Tabs\b' -LackPattern 'usePageTabs' `
-  -IgnoreNames @('Dashboard.tsx', 'Home.tsx', 'Showcase.tsx')
-Add-Check -Id 'M17' -Name 'L1 页签未接 usePageTabs（白名单 Dashboard/Home/Showcase）' -Actual $m17.Count -Expect 0 -Samples $m17 `
+  -IgnoreNames @('Dashboard.tsx', 'Home.tsx', 'Showcase.tsx', 'AppManageDialog.tsx')
+Add-Check -Id 'M17' -Name 'L1 页签未接 usePageTabs（白名单 Dashboard/Home/Showcase/AppManageDialog）' -Actual $m17.Count -Expect 0 -Samples $m17 `
   -Note '新增免 URL 的页签前先确认它属于 L2 视图开关，再进白名单'
 
 # ---------- M18 同页 idPrefix 不得重复 ----------
@@ -283,13 +287,14 @@ $TipBaseline = @{
   #     第 5 条与「停用」那条互斥（新建/编辑两个分支各渲染一条），屏幕上的 tip 数没变。
   #   ReleaseEditorDrawer 3：已发布版本的版本号不可改、下载地址必须绝对地址、
   #     强制更新会阻断旧版本全部用户（开之前必须知道代价）。
-  #   RuntimeTab 1：维护模式不影响签发/支付回调/已生成产物。
+  #   OverviewTab 1：维护模式不影响签发/支付回调/已生成产物。
+  #     （原登记在 RuntimeTab；2026-11-20「在线」页签并入概览，提示随表单一起搬走，总数不变。）
   'pages/admin/apps/AppCreateDialog.tsx'          = 3
   'pages/admin/apps/AppEditDialog.tsx'            = 3
   'pages/admin/apps/tabs/BrandTab.tsx'            = 3
   'pages/admin/apps/tabs/NoticeEditorDrawer.tsx'  = 5
   'pages/admin/apps/tabs/ReleaseEditorDrawer.tsx' = 3
-  'pages/admin/apps/tabs/RuntimeTab.tsx'          = 1
+  'pages/admin/apps/tabs/OverviewTab.tsx'         = 1
   # 2026-11-11 模型服务合页：原来的 Channels.tsx(15) / Models.tsx(3) 两个页面被
   # 拆成「渠道表单」「模型表单」两个组件，条数按拆后的实测值重新登记（总量 19 未增）：
   #   ChannelForm 15：与旧渠道页逐条一致（多密钥调度、分组口径、权重 0 的含义、

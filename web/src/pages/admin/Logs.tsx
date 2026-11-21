@@ -12,14 +12,16 @@ import { toastErr, toastOk } from "@/components/common/Toaster";
 import { usePageTabs, type PageTab } from "@/lib/pageTabs";
 import {
   exportAdminLogs,
+  useAdminAppOptionsQuery,
   useAdminLogAnalyticsQuery,
   useAdminLogDetailQuery,
   useAdminLogsQuery,
   type AdminLogsParams,
 } from "@/lib/api";
 import { ApiError, DEFAULT_PAGE_SIZE } from "@/lib/apiClient";
+import { appFilterField, appIdParam } from "@/lib/appFilter";
 import { logsColumns } from "@/lib/table";
-import type { AdminLogItem } from "@/types";
+import type { AdminAppOption, AdminLogItem } from "@/types";
 
 type LogScope = "hot" | "archive";
 
@@ -47,7 +49,14 @@ const CALL_KIND_ITEMS: [string, string][] = [
   ["precheck", "预检拒绝"],
 ];
 
-const FILTER_FIELDS: FilterField[] = [
+/**
+ * 筛选项：应用在最前（与订单页同一取舍 —— 它是最粗的一刀）。
+ *
+ * 这一页的 params 同时驱动列表、图表（analytics）与导出，
+ * 所以应用筛选加上去是三处一起生效 —— 也正是"只改列表"最容易漏的地方。
+ */
+const filterFields = (appItems: AdminAppOption[]): FilterField[] => [
+  appFilterField(appItems),
   { id: "user_id", t: "search", label: "用户ID", placeholder: "用户 ID" },
   { id: "model", t: "search", label: "模型", placeholder: "模型名称" },
   // 排障时手上最先有的就是这两个 id：放在筛选条上比"翻页找"快一个数量级。
@@ -113,11 +122,13 @@ export function AdminLogsPage() {
       request_id: values.request_id?.trim() || undefined,
       upstream_request_id: values.upstream_request_id?.trim() || undefined,
       channel_key_id: values.channel_key_id?.trim() || undefined,
+      app_id: appIdParam(values.fApp),
       range: values.range || undefined,
     }),
     [scope, page, values],
   );
 
+  const appOpts = useAdminAppOptionsQuery();
   const logs = useAdminLogsQuery(params);
   const analytics = useAdminLogAnalyticsQuery(params);
   const detail = useAdminLogDetailQuery(detailID, scope);
@@ -136,7 +147,20 @@ export function AdminLogsPage() {
     }
   };
 
-  const columns = useMemo(() => logsColumns<AdminLogItem>({ onDetail: (r) => setDetailID(r.id) }), []);
+  const columns = useMemo(
+    () =>
+      logsColumns<AdminLogItem>({
+        onDetail: (r) => setDetailID(r.id),
+        // 应用列：0 = 平台直连（用户自建密钥），与订单页同一口径。
+        app: (r) =>
+          r.app_id === 0 ? (
+            <span className="small muted">平台直连</span>
+          ) : (
+            <span className="small">{r.app_name || "—"}</span>
+          ),
+      }),
+    [],
+  );
 
   return (
     <>
@@ -154,7 +178,7 @@ export function AdminLogsPage() {
       />
 
       <FilterBar
-        fields={FILTER_FIELDS}
+        fields={filterFields(appOpts.items)}
         value={values}
         onChange={onFilter}
         onReset={() => {

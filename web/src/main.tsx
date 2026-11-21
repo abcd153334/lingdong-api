@@ -13,7 +13,7 @@ import {
 } from "@/lib/apiClient";
 import { invalidatePortalMode } from "@/lib/portalMode";
 import { loadSession } from "@/lib/session";
-import { queryClient } from "@/lib/queryClient";
+import { queryClient, clearAccountQueries } from "@/lib/queryClient";
 import { Toaster } from "@/components/common/Toaster";
 import { ConfirmDialogHost } from "@/components/common/ConfirmDialog";
 import { PageScrollbar } from "@/components/chrome/PageScrollbar";
@@ -43,6 +43,10 @@ try {
 // invalidate 会重跑当前匹配路由的 beforeLoad：受保护路由自己抛 redirect
 // （并带上 ?redirect= 回跳参数），公开路由没有守卫，所以什么都不发生。
 setUnauthorizedHandler(() => {
+  // 先清账户级缓存再让守卫重跑：queryKey 不含用户维度、gcTime 默认 5 分钟，
+  // 不清的话共享终端上「A 掉线、B 登录」会在 5 分钟内看到 A 的余额/密钥/订单。
+  // apiClient 只清了 auth store，它不能 import queryClient（会成环），所以放这里。
+  clearAccountQueries();
   void router.invalidate();
 });
 

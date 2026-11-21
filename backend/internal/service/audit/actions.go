@@ -69,6 +69,8 @@ const (
 	ActionAppPluginRecordCreate = "app.plugin.record.create"
 	ActionAppPluginRecordUpdate = "app.plugin.record.update"
 	ActionAppPluginRecordDelete = "app.plugin.record.delete"
+	// 批量删除单独记一笔：它一次可以删掉上百条，"逐条 delete 流水"里看不出这是一次操作。
+	ActionAppPluginRecordBatchDelete = "app.plugin.record.batch_delete"
 	// ActionAppPluginPublic 是"把插件数据开成免凭证可读"这个动作。
 	// 单独记一笔而不是混进 status：它是唯一会改变**匿名可见范围**的操作，
 	// 事后追查"这条数据什么时候出去的"只能靠它。
@@ -223,6 +225,7 @@ var AllowedActions = []string{
 	ActionAppPluginInstall, ActionAppPluginConfig, ActionAppPluginStatus,
 	ActionAppPluginUninstall, ActionAppPluginPurge,
 	ActionAppPluginRecordCreate, ActionAppPluginRecordUpdate, ActionAppPluginRecordDelete,
+	ActionAppPluginRecordBatchDelete,
 	ActionAppPluginPublic,
 
 	ActionVendorCreate, ActionVendorUpdate, ActionVendorDelete, ActionModelVendorProvenance,

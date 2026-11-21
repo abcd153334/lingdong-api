@@ -17,11 +17,12 @@ import {
  * 处罚力度与「展示层数据写错」完全不匹配。
  */
 describe("adminNav 结构", () => {
-  it("7 个分区 / 15 项，路径无重复且与路由一一对应", () => {
+  it("8 个分区 / 15 项，路径无重复且与路由一一对应", () => {
     // 模型服务合页：原来的「模型管理 / 渠道管理 / 适配器 / AI 接入助手」四项
-    // 收敛成**顶级项**「模型服务」一项（助手保留深链，但不再占侧栏）⇒ 项数 18→15，
-    // 可折叠分组 5→4（models 变成顶级项，分组数不变）。
-    expect(adminNav).toHaveLength(7);
+    // 收敛成**顶级项**「模型服务」一项（助手保留深链，但不再占侧栏）⇒ 项数 18→15。
+    // 「用户与应用」拆分（2026-11）：用户管理 / 应用管理各自成为顶级项
+    // ⇒ 分区 7→8、可折叠分组 4→3，项数不变（仍 15）。
+    expect(adminNav).toHaveLength(8);
     expect(adminNavFlat).toHaveLength(15);
     expect(new Set(adminNavFlat.map((i) => i.path)).size).toBe(15);
   });
@@ -39,16 +40,24 @@ describe("adminNav 结构", () => {
     }
   });
 
-  it("三个最常用的入口是顶级项且排在最前（仪表盘 / 系统配置 / 模型服务）", () => {
-    expect(adminNav.slice(0, 3).map((s) => s.title)).toEqual([undefined, undefined, undefined]);
+  it("五个最常用的入口是顶级项且排在最前（仪表盘 / 系统配置 / 模型服务 / 用户管理 / 应用管理）", () => {
+    expect(adminNav.slice(0, 5).map((s) => s.title)).toEqual([
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+    ]);
     expect(adminNav[0].items[0].path).toBe("/admin/dashboard");
     expect(adminNav[1].items[0].path).toBe("/admin/config");
     expect(adminNav[2].items[0].path).toBe("/admin/model-service");
+    // 用户管理 / 应用管理紧跟在模型服务之后：同一批「谁在用、谁在接入」的运营动作
+    expect(adminNav[3].items[0].path).toBe("/admin/users");
+    expect(adminNav[4].items[0].path).toBe("/admin/apps");
   });
 
-  it("4 个分组的标题与顺序冻结（信息架构改动必须同步这条断言）", () => {
+  it("3 个分组的标题与顺序冻结（信息架构改动必须同步这条断言）", () => {
     expect(adminNav.filter((s) => s.title).map((s) => s.title)).toEqual([
-      "用户与应用",
       "交易与资金",
       "运行与审计",
       "文档与接口",
@@ -58,6 +67,10 @@ describe("adminNav 结构", () => {
   it("分区归属与面包屑同源：adminSectionIdOf / adminTitleOf 对同一 path 一致", () => {
     expect(adminSectionIdOf("/admin/config")).toBe("config");
     expect(adminSectionIdOf("/admin/model-service")).toBe("models");
+    // 用户管理 / 应用管理已升为顶级项：各自独占一个分区（不再同属 accounts）
+    expect(adminSectionIdOf("/admin/users")).toBe("users");
+    expect(adminSectionIdOf("/admin/apps")).toBe("apps");
+    expect(adminTitleOf("/admin/apps")).toBe("应用管理");
     // 旧地址已删除：这里顺带钉死"没有第二个模型入口"
     expect(adminSectionIdOf("/admin/models")).toBeUndefined();
     expect(adminSectionIdOf("/admin/channels")).toBeUndefined();

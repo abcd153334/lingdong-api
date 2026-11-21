@@ -3,7 +3,7 @@ import { expect, test, type Page } from "@playwright/test";
 import { canHScroll, envelope, expectNoHScroll, seedAuth } from "./helpers";
 
 const WIDTHS = [375, 768, 1024, 1440];
-/** 24 个业务页：门户 7 + 管理台 13 + 公开静态内容 2 + 页签深链 2 */
+/** 22 个业务页：门户 7 + 管理台 11 + 公开静态内容 2 + 页签深链 2 */
 const PATHS = [
   "/home",
   "/models",
@@ -24,8 +24,9 @@ const PATHS = [
   "/admin/tasks",
   "/admin/config",
   "/admin/audit",
-  // 插件页（泛化路由）：工具栏 + 表格 + 单列表单，窄屏最容易出横向溢出
-  "/admin/apps/2/p/ticket",
+  // 接入应用（卡片列表 + 管理弹窗）：弹窗内页签化后，插件数据页也在弹窗里，
+  // 它的 375 无溢出由 admin-apps-plugins.spec.ts 覆盖。
+  "/admin/apps",
   "/about",
   "/agreement",
   // 页签深链：验证「7 个页签 / 卡内两组页签」在窄屏横滚时仍无布局溢出

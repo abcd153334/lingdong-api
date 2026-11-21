@@ -84,7 +84,8 @@ export interface AdminNavItem {
 /**
  * 管理台导航分区（唯一真相源）。
  *
- * 顶级项 = 没有 `title` 的分区（仪表盘 / 系统配置 / 模型服务）：不画组标题、不可折叠。
+ * 顶级项 = 没有 `title` 的分区（仪表盘 / 系统配置 / 模型服务 / 用户管理 / 应用管理）：
+ * 不画组标题、不可折叠。
  * 顶级项之间是并列的主菜单，顺序即「日常频次 + 产品决策」：越靠前越常点。
  * 用「有 title 必有 icon」的可辨识联合表达，而不是 `title?: string` + `icon?: IconName`：
  * 后者允许「有组标题却忘配图标」，只能靠运行时兜底或测试兜住，编译期就该报错。
@@ -105,7 +106,7 @@ export type AdminNavSection =
   | { id: string; title?: undefined; items: AdminNavItem[] };
 
 export const adminNav: AdminNavSection[] = [
-  // 前三个是顶级项：最常点的入口不能被折叠藏起来。
+  // 前五个是顶级项：最常点的入口不能被折叠藏起来。
   { id: "dashboard", items: [{ title: "仪表盘", path: "/admin/dashboard", icon: "home" }] },
   { id: "config", items: [{ title: "系统配置", path: "/admin/config", icon: "gear" }] },
   // 模型服务是**顶级项**：适配器 → 渠道 → 模型现在是一个页面的三栏，
@@ -114,15 +115,17 @@ export const adminNav: AdminNavSection[] = [
     id: "models",
     items: [{ title: "模型服务", path: "/admin/model-service", icon: "brain" }],
   },
+  // 用户管理 / 应用管理紧跟在模型服务之后，**各占一个顶级项**：
+  // 它们原来合成「用户与应用」一个可折叠组，而一组只有两项 —— 折叠挡不住任何东西，
+  // 反而给「谁在接入、谁在用」这两个最高频的主体多了一层点击才到位。
+  // 拆开后组的数量 4→3、分区 7→8（项目数不变，仍是 15）。
   {
-    id: "accounts",
-    title: "用户与应用",
-    icon: "users",
-    items: [
-      { title: "用户管理", path: "/admin/users", icon: "user" },
-      // 终端用户与接入方应用是「谁在用这套系统」的两个主体。
-      { title: "接入应用", path: "/admin/apps", icon: "external" },
-    ],
+    id: "users",
+    items: [{ title: "用户管理", path: "/admin/users", icon: "user" }],
+  },
+  {
+    id: "apps",
+    items: [{ title: "应用管理", path: "/admin/apps", icon: "external" }],
   },
   {
     id: "billing",
@@ -184,9 +187,9 @@ const ADMIN_OFF_NAV_TITLES: Record<string, string> = {
  * 为什么不是裸 `startsWith`：`/admin/apps-archive` 会被 `/admin/apps` 吃掉，
  * 而这类近似路径在加页时最容易出现。边界字符让"子路径"与"同前缀的另一个页面"分开。
  *
- * 为什么需要它：插件页 `/admin/apps/2/p/ticket` 是运行期路径，
- * 不登记也不该登记进 nav（会让 15 项计数断言全变）。面包屑、侧栏高亮、
- * 分区展开三处都靠这个函数把它归到 `/admin/apps`。
+ * 为什么需要它：子路径页面（如 `/admin/config?tab=billing` 之外的运行期深链）
+ * 不该逐条登记进 nav —— 那会让侧栏项数断言全变。面包屑、侧栏高亮、分区展开
+ * 三处都靠这个函数把它们归到所属分区。
  */
 export function matchPath(prefix: string, path: string): boolean {
   return path === prefix || path.startsWith(`${prefix}/`);

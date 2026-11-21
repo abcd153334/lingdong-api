@@ -14,6 +14,7 @@ import (
 	"lingdong-api/internal/db"
 	"lingdong-api/internal/model"
 	"lingdong-api/internal/pkg/money"
+	"lingdong-api/internal/service/appref"
 	"lingdong-api/internal/service/iconindex"
 	"lingdong-api/internal/service/iconref"
 	"lingdong-api/internal/service/taskview"
@@ -31,6 +32,13 @@ type Filter struct {
 	UserID    uint64
 	Model     string
 	ChannelID uint64
+	// AppID / AppScoped 是「按所属应用筛选」。
+	//
+	// 口径：应用由 `key_id → api_keys.app_id` 派生（appref 是唯一派生点），
+	// 不落冗余列 —— 调用记录是超大表，加列要连带改归档表与 archiveColumns。
+	// AppScoped 让「只看平台直连（app_id=0）」可表达；AppID 非 0 时按应用筛。
+	AppID     uint64
+	AppScoped bool
 	// ChannelKeyID 精确筛「渠道里的哪把 key」（管理台排障用；门户不暴露该筛选）。
 	ChannelKeyID string
 	Modality     string
@@ -55,7 +63,12 @@ type Item struct {
 	Username  string    `json:"username"`
 	KeyID     uint64    `json:"key_id"`
 	KeyName   string    `json:"key_name"`
-	Model     string    `json:"model"`
+	// AppID / AppName 是这条调用归属的应用（经 key_id 派生）。
+	// app_id=0 = 平台直连（用户自建密钥）；AppName 只由 appref 批量补齐。
+	// **门户投影不带这两个字段**：PortalItemOf 是逐字段白名单，不拷贝 Item。
+	AppID   uint64 `json:"app_id"`
+	AppName string `json:"app_name,omitempty"`
+	Model   string `json:"model"`
 	// ModelIconURL 是模型**生效**图标的可渲染地址（自有 → 供应商回落，见 iconindex）。
 	// 历史行必须有图标：改完名字/图标后回看三天前的调用，认模型靠的就是这张图。
 	ModelIconURL string `json:"model_icon_url"`
@@ -187,6 +200,12 @@ func where(f Filter) (string, []any) {
 	}
 	if f.ChannelID > 0 {
 		add("channel_id = ?", f.ChannelID)
+	}
+	if f.AppScoped {
+		// 归因链：usages.key_id → api_keys.app_id；归档表 usages_archive 列集相同，
+		// 同一条条件两边通用。用子查询而不是 JOIN：
+		// COUNT / SELECT / 导出三处都靠 `tbl` 拼表名，JOIN 要同时改三处表引用。
+		add("key_id IN (SELECT id FROM api_keys WHERE app_id = ?)", f.AppID)
 	}
 	if f.ChannelKeyID != "" {
 		add("channel_key_id = ?", f.ChannelKeyID)
@@ -432,6 +451,9 @@ func List(ctx context.Context, f Filter, page, size int, base string) ([]Item, i
 	}
 	users := names(ctx, "users", "username", userIDs)
 	keys := KeyNames(ctx, keyIDs)
+	// 应用归属：整页一次 IN（appref 是唯一派生点）。补名失败只让该列空、不阻断列表 ——
+	// 与上面三张名字表同一口径：一个展示字段的查询不该把整页（含门户投影）打成 500。
+	apps, _ := appref.RefsOfKeys(ctx, db.DB, keyIDs)
 	channels := names(ctx, "channels", "name", chIDs)
 	// 图标和上面三张名字表在同一个位置补（见 iconindex 的包注释）：
 	// 回落规则只在那里一份 —— 在 SQL 里再 JOIN 一次就是第二个派生点。
@@ -444,6 +466,9 @@ func List(ctx context.Context, f Filter, page, size int, base string) ([]Item, i
 		it.Username = users[r.UserID]
 		it.KeyName = keys[r.KeyID]
 		it.ChannelName = channels[r.ChannelID]
+		if ref, ok := apps[r.KeyID]; ok {
+			it.AppID, it.AppName = ref.ID, ref.Name
+		}
 		it.ModelIconURL = iconref.URL(base, icons.Model(r.Model))
 		it.ChannelIconURL = iconref.URL(base, icons.Channel(r.ChannelID))
 		items = append(items, it)
@@ -495,7 +520,11 @@ func AnalyticsData(ctx context.Context, f Filter) (*Analytics, error) {
 	// 否则预检失败会被算成"客户端断开"（http_status 0 落进 upstream_error）。
 	base, args := where(Filter{
 		UserID: f.UserID, Model: f.Model, ChannelID: f.ChannelID, Modality: f.Modality,
+		// 这里是**新字面量**而不是复用 f：只带统计口径需要的字段。
+		// 每加一个筛选项都必须同步加进来，否则会出现「列表按应用筛了、图表还是全站」，
+		// 数据自相矛盾且没有任何报错。
 		Status: f.Status, From: f.From, To: f.To, CallKind: f.CallKind,
+		AppID: f.AppID, AppScoped: f.AppScoped,
 	})
 	// 分支顺序与 kindOf 必须逐条一致（顺序即语义：429 要先于通用 rejected，
 	// 额度不足要先于 401/403 的鉴权桶）。两处同源靠 insufficientCond 共用措辞，
@@ -535,7 +564,10 @@ func AnalyticsData(ctx context.Context, f Filter) (*Analytics, error) {
 	return out, nil
 }
 
-// CSV 按冻结导出列契约（E5，22 列）生成 CSV 文本。
+// CSV 按冻结导出列契约（E5）生成 CSV 文本。
+//
+// 列数 25：原 23 列（时间…IP）+ 2026-11 追加的「应用ID/应用」。
+// 追加只发生在**尾部**：按索引取列的旧对账脚本不受影响；插在中间就是静默错列。
 //
 // 金额列写成「十进制金额」而不是微：导出的文件是给人看、给脚本对账的，
 // 微是内部单位，出现在对账表里只会让每一行都要再除一次 1e6。
@@ -546,11 +578,11 @@ func CSV(items []Item) string {
 	// 表头写死 USD 等于让文件撒谎，对账脚本按表头取列会算错。
 	sb.WriteString("时间,用户,密钥名,模型,模态,事件类型,状态,HTTP," +
 		"输入tok,输出tok,缓存tok,图片tok,音频入tok,音频出tok," +
-		"渠道,分组,耗时ms,费用,成本,币种,请求ID,上游请求ID,IP\n")
+		"渠道,分组,耗时ms,费用,成本,币种,请求ID,上游请求ID,IP,应用ID,应用\n")
 	for _, it := range items {
 		// 币种逐行取，不取全局：一份导出里可能同时含人民币与美元时期的记录。
 		cur := currencyOr(it.Currency)
-		fmt.Fprintf(&sb, "%s,%s,%s,%s,%s,%s,%s,%d,%d,%d,%d,%d,%d,%d,%s,%s,%d,%s,%s,%s,%s,%s,%s\n",
+		fmt.Fprintf(&sb, "%s,%s,%s,%s,%s,%s,%s,%d,%d,%d,%d,%d,%d,%d,%s,%s,%d,%s,%s,%s,%s,%s,%s,%d,%s\n",
 			it.CreatedAt.Format("2006-01-02 15:04:05"),
 			Esc(it.Username), Esc(it.KeyName), Esc(it.Model), Esc(it.Modality),
 			Esc(it.Kind), Esc(statusText(it)), it.HTTPStatus,
@@ -558,9 +590,19 @@ func CSV(items []Item) string {
 			it.AudioInputTokens, it.AudioOutputTokens,
 			Esc(it.ChannelName), Esc(it.Group), it.LatencyMs,
 			money.Format(it.Charge, 6), money.Format(it.Cost, 6), cur,
-			Esc(it.RequestID), Esc(it.UpstreamRequestID), Esc(it.IP))
+			Esc(it.RequestID), Esc(it.UpstreamRequestID), Esc(it.IP),
+			it.AppID, Esc(appCell(it)))
 	}
 	return sb.String()
+}
+
+// appCell 返回应用列的文本：0 = 平台直连。
+// 空白单元格在 Excel 里会被读成"这条数据缺字段"，而不是"这次调用没归属应用"。
+func appCell(it Item) string {
+	if it.AppID == 0 {
+		return "平台直连"
+	}
+	return it.AppName
 }
 
 // Esc 做 CSV 转义：先按 RFC 4180 处理引号/逗号/换行，再对首字符为 = + - @ 或 Tab/CR 的单元格前置单引号，
@@ -835,6 +877,12 @@ func detailByID(ctx context.Context, scope string, id, userID uint64, base, cont
 	d.Username = names(ctx, "users", "username", []uint64{r.UserID})[r.UserID]
 	d.KeyName = KeyNames(ctx, []uint64{r.KeyID})[r.KeyID]
 	d.ChannelName = names(ctx, "channels", "name", []uint64{r.ChannelID})[r.ChannelID]
+	// 详情与列表同源："列表有应用、点进去没有"是这类补名最容易漏的一处。
+	if refs, err := appref.RefsOfKeys(ctx, db.DB, []uint64{r.KeyID}); err == nil {
+		if ref, ok := refs[r.KeyID]; ok {
+			d.AppID, d.AppName = ref.ID, ref.Name
+		}
+	}
 	// 详情与列表走同一份解析（一行也调 Resolve）：这里手拼 token 就会出现
 	// "列表有图标、点进去没有"——而详情页恰恰是最需要认出模型的地方。
 	icons := iconindex.Resolve(ctx, []string{r.Model}, []uint64{r.ChannelID})
