@@ -4,6 +4,13 @@ import tailwindcss from "@tailwindcss/vite";
 
 import { defineConfig } from "vitest/config";
 
+// dev 代理指向的后端。两种本地开发方式端口不同：
+//   · `go run ./cmd/server`（原生）→ 8080
+//   · `bash deploy/ld.sh up`（容器）→ 宿主 8088（APP_PORT）
+// 想连容器里的后端就 `LD_DEV_API=http://127.0.0.1:8088 pnpm dev`。
+// 不把默认值改成 8088：那会让「不启容器、直接跑后端」的日常开发全部 502。
+const devApi = process.env.LD_DEV_API ?? "http://127.0.0.1:8080";
+
 export default defineConfig({
   plugins: [react(), tailwindcss()],
   resolve: {
@@ -25,12 +32,12 @@ export default defineConfig({
     strictPort: true,
     proxy: {
       "/api": {
-        target: "http://127.0.0.1:8080",
+        target: devApi,
         changeOrigin: true,
       },
       // /v1：API 文档页运行台（lib/apiDocs/client.ts 在 DEV 强制同源）直连后端网关
       "/v1": {
-        target: "http://127.0.0.1:8080",
+        target: devApi,
         changeOrigin: true,
       },
       // /f：上传文件的公网直链（`{api_base_url}/f/{id}/{name}`）。
@@ -42,7 +49,7 @@ export default defineConfig({
       // 前缀匹配会把前端的 `/files` 页面也转给后端（实测整页返回 404 JSON），
       // 而这个"页面打不开"的表现完全不会指向代理配置。
       "^/f/": {
-        target: "http://127.0.0.1:8080",
+        target: devApi,
         changeOrigin: true,
       },
     },
