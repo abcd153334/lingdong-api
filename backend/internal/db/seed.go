@@ -1,8 +1,6 @@
 package db
 
 import (
-	"crypto/rand"
-	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -33,6 +31,18 @@ import (
 //
 // 无论哪种来源，口令都不落仓库、不进镜像。
 const bootstrapAdminEnv = "LD_BOOTSTRAP_ADMIN_PASSWORD"
+
+// defaultBootstrapPassword 是出厂内置的管理员口令。
+//
+// 为什么要内置而不是随机生成：随机口令必须"被人拿到"，于是要么翻首启日志（一行，
+// 极易被构建输出刷走），要么再落一个交接文件、再写一个抓取脚本、再在文档里教两遍
+// 怎么找 —— 一条部署链上多出四个活动件，只为了传一个字符串。克隆即部署的代价
+// 不该花在这里。
+//
+// 代价是"出厂口令是公开的"，用 must_change_password=true 兜住：这个口令只够进门，
+// 进门第一件事就是改密（见 seedAdmin 里 must_change_password 的来源）。想跳过强制
+// 改密（例如给 CI 建静态环境）就显式设 LD_BOOTSTRAP_ADMIN_PASSWORD。
+const defaultBootstrapPassword = "admin123"
 
 // Seed 写入幂等种子数据（ON CONFLICT DO NOTHING）。
 //
@@ -168,7 +178,7 @@ func SeedModalityDefaults(gdb *gorm.DB) error {
 
 func seedAdmin(gdb *gorm.DB) error {
 	now := time.Now()
-	password, generated := bootstrapAdminPassword()
+	password, isFactoryDefault := bootstrapAdminPassword()
 	hash, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
 	if err != nil {
 		return fmt.Errorf("db: 生成管理员口令摘要失败: %w", err)
@@ -182,7 +192,7 @@ func seedAdmin(gdb *gorm.DB) error {
 		"role":                 int16(0),
 		"status":               int16(1),
 		"group":                "default",
-		"must_change_password": generated,
+		"must_change_password": isFactoryDefault,
 		"created_at":           now,
 		"updated_at":           now,
 	}
@@ -190,11 +200,15 @@ func seedAdmin(gdb *gorm.DB) error {
 	if res.Error != nil {
 		return fmt.Errorf("db: 种子默认管理员失败: %w", res.Error)
 	}
-	// 只在"真的新建了这一行"时打印。已存在时 OnConflict 不动行，
-	// 每次启动都打印会让随机口令在日志里长期留存 —— 那正是要消除的东西。
-	if res.RowsAffected > 0 && generated {
-		logger.L().Warn("已创建管理员账号 admin，初始口令如下（仅打印这一次，登录后必须先改密）",
-			zap.String("username", "admin"), zap.String("password", password))
+	// 只在"真的新建了这一行"时打印。已存在时 OnConflict 不动行 —— 每次启动都报一次
+	// "账号 admin 已就绪"属于噪音。出厂口令本身不进日志：它是文档里的公开值，
+	// 写进日志只会在别人的 log 里多留一处"看起来像凭据"的东西。
+	if res.RowsAffected > 0 {
+		msg := "已创建管理员账号 admin"
+		if isFactoryDefault {
+			msg += "，出厂口令见 README「初始口令」，首个登录会被强制改密"
+		}
+		logger.L().Info(msg, zap.String("username", "admin"))
 	}
 	return nil
 }
@@ -246,21 +260,15 @@ func seedDefaultApp(gdb *gorm.DB) error {
 	return nil
 }
 
-// bootstrapAdminPassword 返回初始超管口令，以及它是否是系统随机生成的。
+// bootstrapAdminPassword 返回初始超管口令，以及它是否取的是出厂默认值。
 //
-// 随机生成时调用方会置 must_change_password：这串口令会出现在一次日志里，
-// 它只能当"交接凭证"用，不能作为长期口令。
+// 第二个返回值直接决定 must_change_password：出厂口令写在本仓库文档里、人人可见，
+// 只够进门，进门必须先改密；运维显式指定的口令视为有意选择（CI、自动化建环境），不拦。
 func bootstrapAdminPassword() (string, bool) {
 	if v := strings.TrimSpace(os.Getenv(bootstrapAdminEnv)); v != "" {
 		return v, false
 	}
-	buf := make([]byte, 18) // 18 字节 → 24 个 base64 字符，约 144 bit
-	if _, err := rand.Read(buf); err != nil {
-		// 随机源不可用时**不能退化成一个固定口令**：那等于把公开口令又装回去。
-		// 直接让启动失败，由运维显式配置 LD_BOOTSTRAP_ADMIN_PASSWORD。
-		panic("db: 无法生成管理员随机口令: " + err.Error())
-	}
-	return base64.RawURLEncoding.EncodeToString(buf), true
+	return defaultBootstrapPassword, true
 }
 
 func seedSystemConfig(gdb *gorm.DB) error {

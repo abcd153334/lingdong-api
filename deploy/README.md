@@ -10,25 +10,16 @@ cd lingdong-api
 bash deploy/ld.sh up
 ```
 
-看到 `PASS 深探通过` 就完成了。打开 `http://127.0.0.1:8088`，
-初始管理员口令会被自动存到 `~/.lingdong-admin-initial`（600，用户名 `admin`）。
-它只在**首次建号**时生成一次；日志里也有一份，但很容易被构建输出刷走：
+看到 `PASS 深探通过` 就完成了。打开 `http://127.0.0.1:8088`，用**出厂账号 `admin` / `admin123`** 登录。
 
-```bash
-cat ~/.lingdong-admin-initial
-docker compose -f deploy/docker-compose.yml logs backend | grep 初始口令   # 备查
-```
+这个口令是写死在代码里的常量（`db.defaultBootstrapPassword`），不需要翻日志、不需要找文件。
+首个登录会被强制改密 —— 出厂口令只负责让你进门：
 
-想自己定初始口令：部署前 `export LD_BOOTSTRAP_ADMIN_PASSWORD='...'`（只在**首次创建**时生效，
-且这样建出来的账号不会被强制改密）。
+> 想跳过强制改密（CI、自动化建环境）：部署前 `export LD_BOOTSTRAP_ADMIN_PASSWORD='...'`，
+> 只在**首次建号**时生效。
 
-**重装时注意**：`~/.lingdong-admin-initial` 已存在时脚本不会覆盖（防止第二次启动把交接凭据
-冲掉）。所以 `down -v` 连数据卷删掉、库重建之后再部署，请先删掉这个文件，否则拿到的是
-**已经不存在的那个库**的口令：
-
-```bash
-rm -f ~/.lingdong-admin-initial && bash deploy/ld.sh up
-```
+**改过之后忘了怎么办**：库里存的是 bcrypt，读不出原文。库还在就新建一个管理员重置；
+库也没了就用备份恢复（见 §6）。
 
 版本号不用手写：`ld.sh up` 会读当前 checkout 的 tag 注入二进制，`/api/health` 的
 `version` 与 tag 一致；不带 tag 的 checkout（如直接下压缩包）才会落在 `dev`。
@@ -206,13 +197,14 @@ curl -sS http://127.0.0.1:8088/api/health?deep=1
 **所有用户的 IP 都是 127.0.0.1？**
 `LD_TRUSTED_PROXIES` 少了 `127.0.0.1/32`（入口与容器同机时必须信任回环）。
 
-**初始口令找不到 / 忘了？**
-先看交接文件：`cat ~/.lingdong-admin-initial`（用户名 `admin`）。
-看日志是备选：`docker compose logs backend | grep 初始口令` —— 只在**首次创建**时打印一次，
-之后任何重启都不再打（随机口令长期留在日志里等于把公开口令又装回去）。
-两者都没有（文件被删、日志也被清）且库还在时，只能新建一个管理员或从上一次备份恢复；
-口令存的是 bcrypt，从库里读不出原文。
-改过之后又忘了：用另开一个管理员重置，没有第二个管理员时用建号前的备份恢复。
+**初始口令是什么？**
+`admin` / `admin123`，写死在代码里（`backend/internal/db/seed.go` 的 `defaultBootstrapPassword`）。
+只在**首次建号**时生效：账号已存在时 seed 走 `ON CONFLICT DO NOTHING`，改这个常量不会重置
+任何已有账号的口令。
+
+**改过之后忘了怎么办？**
+口令存的是 bcrypt，从库里读不出原文。库还在就新建一个管理员重置（或从上一次备份恢复）；
+`down -v` 重建过库的话，下个启动会重新建 admin，又是 `admin123`。
 
 **能不能多机部署？**
 可以，但那是可选组件：[`deploy/optional/cluster/`](optional/cluster/docker-compose.node.yml)
@@ -230,7 +222,6 @@ deploy/
   .env.example             变量字典（不是模板，别复制）
   scripts/
     init-env.sh            生成/补全 .env（幂等，不覆盖已有值）
-    capture-initial-admin.sh  首启口令落到 ~/.lingdong-admin-initial（600）
     healthcheck.sh         浅探 + 深探 + 版本核对
     backup.sh restore.sh   备份与恢复（9 项账务指纹）
     upgrade.sh             体检 → 备份 → 切版本 → 核对

@@ -68,8 +68,9 @@ case "${1-}" in
       ( cd "$DIR" && docker compose -f "$COMPOSE_FILE" up -d --build "${args[@]}" )
     fi
     bash "$DIR/scripts/healthcheck.sh" --wait 180
-    # 首启口令单行打印，很容易被构建日志刷走；落到 ~/.lingdong-admin-initial（600）。
-    bash "$DIR/scripts/capture-initial-admin.sh" || true
+    # 出厂口令是公开值，直接说清楚，不藏在日志或文件里。
+    port="$(sed -n 's/^APP_PORT=//p' "$DIR/.env" 2>/dev/null | tail -1)"
+    echo "  管理台: http://127.0.0.1:${port:-8088}   账号 admin / admin123（首个登录会被强制改密）"
     ;;
   init)        bash "$DIR/scripts/init-env.sh" ;;
   down)
