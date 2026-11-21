@@ -26,8 +26,19 @@ RUN go mod download
 #
 # -X 只能覆盖字符串 **var**：controller.Version 写成 const 时链接器会静默忽略，
 # 镜像里的版本号永远是源码字面量（回滚无法确认跑的是哪个 tag）。
+#
+# -tags nodynamic 是**启动必需**，不是性能取舍 —— 缺了它容器会以退出码 139 无限重启、
+# 且一行日志都不打。链路是：service/upload 用了 github.com/gen2brain/webp，
+# 它在 (unix|darwin|windows) && !nodynamic 下编译 webp_dynamic.go → 引入
+# github.com/ebitengine/purego → purego 在 linux && !cgo 下启用 internal/fakecgo，
+# 后者用 go:linkname 注册 _cgo_init。Go 运行时在 rt0_go 里一旦看到 _cgo_init 就调用它，
+# 而那一刻**任何 Go init() 都还没执行**：fakecgo.malloc 里的 call5(mallocABI0, …)
+# 目标地址仍是 0 → 跳到地址 0 → SIGSEGV（dmesg: ip 0000000000000000）。
+# 打上 nodynamic 后 purego 整个退出编译，webp 改走内嵌 libwebp 的 WASM（wazero）实现，
+# 二进制回到真静态链接（program headers 里不再有 PT_INTERP / PT_DYNAMIC）。
+# 代价：镜像大约 +10MB，首次 encode/decode 多一次 wasm 编译（惰性，毫秒级）。
 COPY backend/ ./
-RUN CGO_ENABLED=0 GOOS=linux go build -trimpath \
+RUN CGO_ENABLED=0 GOOS=linux go build -trimpath -tags nodynamic \
       -ldflags="-s -w -X 'lingdong-api/internal/controller.Version=${VERSION}'" \
       -o /out/server .
 
