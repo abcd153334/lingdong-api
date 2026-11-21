@@ -524,6 +524,9 @@ DRY-RUN：将按以下顺序执行（不碰数据库、不碰容器）
 EOF
 }
 
+# hash_of 输出文件的 sha256；没有 sha256sum 时输出空串（两处比较都退化成"跳过"）。
+hash_of() { sha256sum "$1" 2>/dev/null | cut -d' ' -f1; }
+
 # check_self_outdated 提示"仓库里的 agent 已经比正在跑的新"。
 #
 # 为什么需要这个提示：agent 的运行副本故意放在仓库之外（`/opt/lingdong/updater`，
@@ -534,7 +537,7 @@ check_self_outdated() {
   local src="$REPO_PATH/deploy/optional/agent/ld-updater.sh"
   [ -f "$src" ] || return 0
   command -v sha256sum >/dev/null 2>&1 || return 0
-  if [ "$(sha256sum "$src" | cut -d' ' -f1)" != "$(sha256sum "$0" | cut -d' ' -f1)" ]; then
+  if [ "$(hash_of "$src")" != "$(hash_of "$0")" ]; then
     warn "更新程序与仓库版本不一致：执行 sudo bash deploy/ld.sh updater 让它生效"
   fi
 }
@@ -549,12 +552,17 @@ check_self_outdated() {
 # 重启循环，因为运行副本已被覆盖），复制失败就继续用旧脚本（旧的至少能跑）。
 self_heal() {
   local src="$REPO_PATH/deploy/optional/agent/ld-updater.sh"
+  local new old
   [ -f "$src" ] || return 0
   command -v sha256sum >/dev/null 2>&1 || return 0
-  [ "$(sha256sum "$src" | cut -d' ' -f1)" = "$(sha256sum "$0" | cut -d' ' -f1)" ] && return 0
+  new="$(hash_of "$src")"; old="$(hash_of "$0")"
+  [ -n "$new" ] && [ "$new" = "$old" ] && return 0
   bash -n "$src" 2>/dev/null || { warn "仓库里的更新程序语法不通过，保留当前版本"; return 0; }
-  log "更新程序自身有新版本，同步后重启"
+  # 带上新旧前 8 位：事后查"到底自愈了没有"时，日志里这两串比一句"已同步"有用。
+  log "更新程序自身有新版本（${old:0:8} → ${new:0:8}），同步后重启"
   install -m 0755 "$src" "$0" || { warn "自同步失败，继续使用当前版本"; return 0; }
+  # 复制后再比一次：源文件可能在 install 期间被 checkout 改写，那就不 exec 了（避免来回跳）。
+  [ "$(hash_of "$0")" = "$new" ] || { warn "自同步后哈希仍不一致，保留当前进程"; return 0; }
   # exec 替换进程映像：fd 9 上的 flock 仍属于本进程，重启后的 flock -n 9 依然成功。
   exec "$0"
 }
