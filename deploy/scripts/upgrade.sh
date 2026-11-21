@@ -35,10 +35,19 @@ esac
 
 require_docker
 
-# 镜像必须已经存在：不存在说明"忘了构建"，此时 up -d 会拿到旧的同名镜像或直接失败
+# 镜像必须存在，否则 `up -d` 会拿旧的同名镜像或直接失败。
+# 本地没有就先试着拉发布镜像：升级/回滚的常规姿势本来就是"拉一个已发布的版本"，
+# 以前这里直接 die，用户得先手动 `TAG=… docker compose pull` 才能升级 —— README
+# 里也只能写成两步。拉不到（离线 / 私有仓库 / 该 tag 从未发布）再报错并给本地构建的出路。
 IMG="$(app_image "$TAG_ARG")"
 if ! docker image inspect "$IMG" >/dev/null 2>&1; then
-  die "找不到镜像 $IMG —— 先执行 tag-release.sh $TAG_ARG，或确认这是一次回滚（旧镜像被清理了就得重新构建同一份源码）"
+  log "本地没有 $IMG，尝试从镜像仓库拉取"
+  if ( cd "$DEPLOY_DIR" && TAG="$TAG_ARG" docker compose -f "$COMPOSE_FILE" pull backend ); then
+    docker image inspect "$IMG" >/dev/null 2>&1 \
+      || die "已执行 pull，但镜像 $IMG 仍不存在（检查编排里的 LD_IMAGE 与 TAG 是否与本次一致）"
+  else
+    die "拉不到镜像 $IMG —— 离线环境请先执行 tag-release.sh $TAG_ARG 构建同一份源码；本次未做任何变更"
+  fi
 fi
 
 if [ "$DO_PREFLIGHT" = "1" ]; then

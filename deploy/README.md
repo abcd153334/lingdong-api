@@ -160,9 +160,8 @@ bash deploy/scripts/restore.sh deploy/backups/<时间戳>/xxx.dump \
 否则「回滚后跑的是哪一版」又变成靠猜。
 
 ```bash
-# 用发布镜像升级（推荐）：TAG 换成要去的版本
-TAG=<TAG> docker compose -f deploy/docker-compose.yml pull
-TAG=<TAG> bash deploy/scripts/upgrade.sh <TAG> --app-only
+# 用发布镜像升级 / 回滚（推荐）：本地没有该 tag 会自动拉，拉不到会明确报错且不做任何变更
+bash deploy/scripts/upgrade.sh <TAG> --app-only
 
 # 自己构建（改了代码 / 离线）
 bash deploy/scripts/tag-release.sh <TAG>       # 构建 + 记账到 deploy/.release
