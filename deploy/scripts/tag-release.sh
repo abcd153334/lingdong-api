@@ -19,11 +19,16 @@ source "$(dirname "${BASH_SOURCE[0]}")/lib/compose.sh"
 
 TAG_ARG=""
 PULL=0
+RECORD_ONLY=0
 while [ $# -gt 0 ]; do
   case "$1" in
     # --pull：优先用发布镜像（几十秒），拉不到再本地构建（3–8 分钟）。
     # 一键更新的 agent 走这条路：宿主机不必有 Go/pnpm 依赖镜像可达的构建网络。
     --pull) PULL=1; shift ;;
+    # --record-only：只写 .release（version/commit/image/data_epoch/previous），不构建不拉取。
+    # `ld.sh up` 用它：那条路是"构建后直接起"，不走本脚本，于是 .release 缺失，
+    # 而 agent 与 upgrade.sh 都靠它回答"上一版是谁"。
+    --record-only) RECORD_ONLY=1; shift ;;
     -*) die "未知参数：$1" ;;
     *)
       [ -z "$TAG_ARG" ] || die "只能给一个 TAG（多余参数：$1）"
@@ -45,7 +50,13 @@ require_cmd awk
 
 IMG="$(app_image "$TAG_ARG")"
 pulled=0
-if [ "$PULL" = "1" ] && docker image inspect "$IMG" >/dev/null 2>&1; then
+if [ "$RECORD_ONLY" = "1" ]; then
+  # 只记账：镜像必须已经在（否则记下的 image_id 是空，回退点也就没了）
+  docker image inspect "$IMG" >/dev/null 2>&1 \
+    || die "--record-only 需要镜像已存在：$IMG（先 up / tag-release）"
+  log "只记账：$IMG"
+  pulled=1
+elif [ "$PULL" = "1" ] && docker image inspect "$IMG" >/dev/null 2>&1; then
   # 本地已有同一 tag：直接复用。重复更新到同一版不该再花几分钟构建。
   log "本地已有 $IMG，跳过构建"
   pulled=1

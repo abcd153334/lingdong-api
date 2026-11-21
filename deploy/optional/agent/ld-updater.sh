@@ -107,14 +107,25 @@ app_repo() {
 app_image() { printf '%s:%s' "$(app_repo)" "${1:-latest}"; }
 
 # db：执行一条 SQL，返回制表符分隔的行。
-# 走容器内的 psql：宿主机不需要装客户端（生产宿主机通常只有 Docker）。
+#
+# **必须走 stdin，不能用 `-c`**：psql 的 `-c` 把字符串直接发给服务端，不做变量插值，
+# 于是 `:'job_id'` 原样发过去变成 `syntax error at or near ":"`。而本脚本所有 SQL
+# 都用 `:'name'` 参数化（拼字符串等于自己开一个注入口），只有 stdin / `-f` 这条路可用。
+#
+# 这个错误在真机装 agent 之前从未暴露过：症状是每 5 秒一句
+# "WARN 领取任务失败（数据库不可用？）"，看起来像连不上库，其实库一直是好的。
+#
+# `--quiet` 也不能省：DML 的命令标签（"UPDATE 0"）不受 --tuples-only 影响，
+# 它会跟着结果一起进 stdout。少了它，claim 在"没有任务"时拿到的不是空串，
+# 而是字符串 "UPDATE 0" —— 被当成一条 id 叫 UPDATE 0 的任务，每 5 秒报一次
+# `invalid input syntax for type bigint`。
 db() {
   local sql="$1"; shift
   ( cd "$REPO_PATH/deploy" && \
-    docker compose -f "$(basename "$COMPOSE_FILE")" exec -T \
+    printf '%s\n' "$sql" | docker compose -f "$(basename "$COMPOSE_FILE")" exec -T \
       -e PGPASSWORD="$PG_PASS" postgres \
-      psql -U "$PG_USER" -d "$PG_DB" --no-psqlrc --no-align --tuples-only \
-           --field-separator=$'\t' "$@" -c "$sql" )
+      psql -U "$PG_USER" -d "$PG_DB" --quiet --no-psqlrc --no-align --tuples-only \
+           --field-separator=$'\t' "$@" )
 }
 
 load_db_conf() {
@@ -215,8 +226,24 @@ release_field() { # key
   grep -E "^$1=" "$REPO_PATH/deploy/.release" | cut -d= -f2- || true
 }
 
+# current_tag 返回"**正在跑**的是哪一版"，以运行中容器的镜像 tag 为准。
+#
+# 为什么不信 deploy/.release：那个文件只有 tag-release.sh 会写，而
+# `ld.sh up`（构建后直接起）与手工 `compose up` 都不写它。于是"刚部署完、
+# 还没走过一次发布记账"的实例，第 4 步会拿不到回退点，直接判
+# rollback_unavailable —— 一次更新都跑不成，而站点完全正常。
+# 容器的 Config.Image 才是"它现在跑的是哪个镜像"的直接证据。
+current_tag() {
+  local img
+  img="$(docker inspect -f '{{.Config.Image}}' lingdong-backend 2>/dev/null || true)"
+  case "$img" in
+    *:*) printf '%s' "${img##*:}" ;;
+    *)   release_field version ;;
+  esac
+}
+
 agent_seen() {
-  local tag; tag="$(release_field version)"
+  local tag; tag="$(current_tag)"
   db "INSERT INTO release_agent_state (id, host, version, repo_path, current_tag, seen_at)
       VALUES (1, :'host', :'ver', :'repo', :'tag', now())
       ON CONFLICT (id) DO UPDATE
@@ -308,9 +335,12 @@ do_job() {
 
   # 4) 记回退点：切换前一秒才知道要回退到哪，就已经晚了。
   #    记的是**镜像 ID**（tag 可被覆盖，ID 不会），并在回退时按 ID 重新 tag 一份。
-  PREV_COMMIT="$(git -C "$REPO_PATH" rev-parse HEAD)"
+  PREV_TAG="$(current_tag)"
+  if [ -n "$PREV_TAG" ]; then
+    PREV_COMMIT="$(git -C "$REPO_PATH" rev-parse -q --verify "refs/tags/$PREV_TAG^{commit}" 2>/dev/null || true)"
+  fi
+  [ -n "$PREV_COMMIT" ] || PREV_COMMIT="$(git -C "$REPO_PATH" rev-parse HEAD)"
   local prev_backend epoch_before
-  PREV_TAG="$(release_field version)"
   prev_backend="$(docker image inspect -f '{{.Id}}' "$(app_image "${PREV_TAG:-none}")" 2>/dev/null || true)"
   epoch_before="$(data_epoch)"
   if [ -z "$prev_backend" ] || [ -z "$epoch_before" ]; then

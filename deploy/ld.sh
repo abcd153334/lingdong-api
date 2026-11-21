@@ -69,6 +69,13 @@ case "${1-}" in
       ( cd "$DIR" && docker compose -f "$COMPOSE_FILE" up -d --build "${args[@]}" )
     fi
     bash "$DIR/scripts/healthcheck.sh" --wait 180
+    # 记账：让 deploy/.release 与"正在跑的版本"一致。
+    # agent 用它回答"上一版是谁"（回退点）、upgrade.sh 用它打印回滚命令，
+    # 而它们只认 tag-release.sh 写的格式 —— `up` 是另一条起站路径，必须补这一步。
+    if [ -n "${TAG:-}" ]; then
+      bash "$DIR/scripts/tag-release.sh" "$TAG" --record-only >/dev/null 2>&1 \
+        || echo "⚠ 写 deploy/.release 失败（不影响运行；自动回退点会缺失）" >&2
+    fi
     # 出厂口令是公开值，直接说清楚，不藏在日志或文件里。
     port="$(sed -n 's/^APP_PORT=//p' "$DIR/.env" 2>/dev/null | tail -1)"
     echo "  管理台: http://127.0.0.1:${port:-8088}   账号 admin / admin123（首个登录会被强制改密）"
