@@ -44,7 +44,8 @@ docker compose -f deploy/docker-compose.yml logs backend | grep 初始口令
 
 ```bash
 bash deploy/ld.sh up            # 启动 / 应用改动（自动生成 .env、构建、等健康）
-bash deploy/ld.sh up --pull     # 用发布镜像启动（不打 tag 时拉 :latest，几十秒）
+bash deploy/ld.sh up --pull     # 用发布镜像启动（不打 tag 时拉 :latest，几十秒；
+                                #  拉不到会自动退回本地构建，国内网络不必先祈祷）
 bash deploy/ld.sh ps            # 容器状态
 bash deploy/ld.sh logs          # 跟踪 backend 日志（默认）
 bash deploy/ld.sh health        # 浅探 + 深探（DB/Redis 真可用）
@@ -59,7 +60,7 @@ bash deploy/ld.sh preflight     # 部署前体检（可选）
 
 ## 3. 配置
 
-`ld.sh init` 生成的 `.env` 只有 5 行，全部自动填好：
+`ld.sh init` 生成的 `.env` 只有 6 行，全部自动填好：
 
 | 键 | 说明 |
 |---|---|
@@ -154,13 +155,13 @@ bash deploy/scripts/restore.sh deploy/backups/<时间戳>/xxx.dump \
 否则「回滚后跑的是哪一版」又变成靠猜。
 
 ```bash
-# 用发布镜像升级（推荐）
-TAG=v2.2.1 docker compose -f deploy/docker-compose.yml pull
-TAG=v2.2.1 bash deploy/scripts/upgrade.sh v2.2.1 --app-only
+# 用发布镜像升级（推荐）：TAG 换成要去的版本
+TAG=<TAG> docker compose -f deploy/docker-compose.yml pull
+TAG=<TAG> bash deploy/scripts/upgrade.sh <TAG> --app-only
 
 # 自己构建（改了代码 / 离线）
-bash deploy/scripts/tag-release.sh v2.2.1     # 构建 + 记账到 deploy/.release
-bash deploy/scripts/upgrade.sh v2.2.1 --app-only
+bash deploy/scripts/tag-release.sh <TAG>       # 构建 + 记账到 deploy/.release
+bash deploy/scripts/upgrade.sh <TAG> --app-only
 ```
 
 `upgrade.sh` 的顺序是：体检 → 备份（失败即中止）→ 只切应用容器 → 等健康并**核对版本 + 深探 DB**。
