@@ -7,7 +7,17 @@
 
 set -euo pipefail
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# 三个路径必须都相对「本文件」推导 —— 本文件在 deploy/scripts/lib/ 下，
+# 而各脚本按 SCRIPT_DIR=deploy/scripts、ROOT_DIR=仓库根 使用它们
+# （见 scripts/check-version.sh 等独立脚本的同类推导）。
+#
+# 历史缺陷：这里曾直接用 BASH_SOURCE 的目录当 SCRIPT_DIR，于是
+# SCRIPT_DIR=deploy/scripts/lib、DEPLOY_DIR=deploy/scripts、ROOT_DIR=deploy，
+# 三者各浅一级 —— ENV_FILE/COMPOSE_FILE/.release/fingerprint.sql/preflight.sh
+# 全部指向不存在的路径，`bash deploy/scripts/preflight.sh` 第一步就报
+# 「找不到 deploy/scripts/.env」，所有 source 本文件的脚本都不可用。
+LIB_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SCRIPT_DIR="$(cd "$LIB_DIR/.." && pwd)"
 DEPLOY_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 ROOT_DIR="$(cd "$DEPLOY_DIR/.." && pwd)"
 ENV_FILE="${ENV_FILE:-$DEPLOY_DIR/.env}"
