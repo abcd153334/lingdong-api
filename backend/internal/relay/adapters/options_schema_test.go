@@ -51,6 +51,10 @@ func TestGeneratedOptionsSchemaIsUpToDate(t *testing.T) {
 	if err != nil {
 		t.Fatalf("读取生成物失败: %v", err)
 	}
+	// 行尾归一化：Windows 检出会把文件写成 CRLF（core.autocrlf），而生成器只输出 LF。
+	// 不归一化时，Windows 上每次 clone 这条门禁都会假红（Linux/CI 无此问题）。
+	// 这里只抹掉行尾差异，真正的字段漂移仍逐字节比对，判据不变。
+	got = bytes.ReplaceAll(got, []byte("\r\n"), []byte("\n"))
 	if !bytes.Equal(got, want) {
 		t.Fatal("前端常量已过期：请在 backend 目录运行 go run ./cmd/dump-adapter-options 并提交")
 	}

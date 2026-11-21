@@ -1,6 +1,8 @@
 package devdoc
 
 import (
+	"errors"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
@@ -85,6 +87,13 @@ func TestGoldenDocInRepo(t *testing.T) {
 	path := filepath.Join("..", "..", "..", "..", "..", "docs", FileName)
 	got, err := os.ReadFile(path)
 	if err != nil {
+		// 与 TestSampleMatchesDoc 同一口径：docs/ 按公开仓白名单不入库，
+		// clone 出来必然没有它 → skip；目录在而文件不在 → 仍然是失败。
+		if errors.Is(err, fs.ErrNotExist) {
+			if _, dirErr := os.Stat(filepath.Dir(path)); errors.Is(dirErr, fs.ErrNotExist) {
+				t.Skipf("跳过：%s 不存在（公开仓不含 docs/，仅保留文档的检出会校验）", filepath.Dir(path))
+			}
+		}
 		t.Fatalf("读取 %s 失败（应先运行生成器）: %v", path, err)
 	}
 	if string(got) != Markdown() {

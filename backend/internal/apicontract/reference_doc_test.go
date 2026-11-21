@@ -19,7 +19,10 @@ package apicontract_test
 //  4. 附录错误码表与 `errs` 是否双向一致。
 
 import (
+	"errors"
+	"io/fs"
 	"os"
+	"path/filepath"
 	"regexp"
 	"strings"
 	"testing"
@@ -32,18 +35,31 @@ import (
 // （`backend/internal/apicontract` → 上三级是仓库根）。
 const referenceDocPath = "../../../docs/开放API参考.md"
 
-// loadReferenceDoc 读取参考文档；缺失时**失败而不是 skip**。
+// loadReferenceDoc 读取参考文档。
 //
-// 原因与集成测试的 DSN 相反：DSN 缺失时 skip 是合理的（本机没有测试库），
-// 而这份文档是本仓库的一部分，"读不到"意味着目录结构变了，那时门禁应当喊出来。
+// 三种情况分开处理（此前一律 Fatalf，导致公开仓 clone 出来必然红 3 条）：
+//  1. 文件在 → 正常校验；
+//  2. 连 docs/ 目录都不存在 → skip。公开仓按白名单（.gitignore 的 docs/ 一行 +
+//     check-repo-hygiene.sh 的 DENY）**不包含任何交付文档**，clone 出来天然没有它，
+//     此时判红等于要求接入方无法通过本仓的测试；
+//  3. docs/ 在、文件不在 → 仍然 Fatalf。这才是原作者要防的场景：
+//     目录结构变了或文档被改名，门禁必须喊出来，不能被 skip 吞掉。
 func loadReferenceDoc(t *testing.T) string {
 	t.Helper()
 	raw, err := os.ReadFile(referenceDocPath)
-	if err != nil {
-		t.Fatalf("读不到 %s（%v）：这份参考文档必须随仓库一起交付，"+
-			"否则接入方拿不到与自己版本匹配的字段说明", referenceDocPath, err)
+	if err == nil {
+		return string(raw)
 	}
-	return string(raw)
+	if errors.Is(err, fs.ErrNotExist) {
+		if _, dirErr := os.Stat(filepath.Dir(referenceDocPath)); errors.Is(dirErr, fs.ErrNotExist) {
+			t.Skipf("跳过：%s 不存在（公开仓按白名单不含交付文档，仅保留文档的检出会执行本用例）",
+				filepath.Dir(referenceDocPath))
+		}
+	}
+	t.Fatalf("读不到 %s（%v）：docs/ 目录存在但文档缺失 —— 目录结构变了或文档被改名，"+
+		"这份参考文档必须与契约同步交付，否则接入方拿不到与自己版本匹配的字段说明",
+		referenceDocPath, err)
+	return ""
 }
 
 // endpointSections 把文档按 `### 标题` 切成章节。

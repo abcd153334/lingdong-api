@@ -2,6 +2,8 @@ package appplugins
 
 import (
 	"encoding/json"
+	"errors"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -21,6 +23,14 @@ func TestSampleMatchesDoc(t *testing.T) {
 	path := filepath.Join("..", "..", "..", "..", "docs", "应用插件开发手册.md")
 	raw, err := os.ReadFile(path)
 	if err != nil {
+		// docs/ 按公开仓白名单不入库（.gitignore 与 check-repo-hygiene.sh 的 DENY），
+		// clone 出来必然没有它。此时 skip；但 docs/ 目录在、文件不在时要 Fatalf，
+		// 那说明文档被改名或删了 —— 才是这条门禁真正要抓的。
+		if errors.Is(err, fs.ErrNotExist) {
+			if _, dirErr := os.Stat(filepath.Dir(path)); errors.Is(dirErr, fs.ErrNotExist) {
+				t.Skipf("跳过：%s 不存在（公开仓不含 docs/，仅保留文档的检出会校验）", filepath.Dir(path))
+			}
+		}
 		t.Fatalf("读不到插件文档（路径 %s）: %v", path, err)
 	}
 	block, ok := firstJSONBlock(string(raw))
