@@ -217,6 +217,7 @@ deploy/
   .env.example             变量字典（不是模板，别复制）
   scripts/
     init-env.sh            生成/补全 .env（幂等，不覆盖已有值）
+    capture-initial-admin.sh  首启口令落到 ~/.lingdong-admin-initial（600）
     healthcheck.sh         浅探 + 深探 + 版本核对
     backup.sh restore.sh   备份与恢复（9 项账务指纹）
     upgrade.sh             体检 → 备份 → 切版本 → 核对
