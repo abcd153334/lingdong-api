@@ -18,11 +18,13 @@ import (
 )
 
 // Version 是后端版本号（S20 验收重做交付升版；与 acceptance-report-v2.1.0 一致）。
+// v2.1.1：首次从 git tag 部署的版本 —— v2.1.0 这个 tag 已被初始提交占用，
+// 复用它会变成"同名 tag 指向两处代码"，所以本次发布前进一位。
 //
 // 必须是 var：发布流程用 `-ldflags -X` 把镜像标签注入进来，而链接器**只覆盖字符串
 // var**，对 const 静默忽略。写成 const 时打出来的镜像，`/api/health.version` 永远是
 // 源码里的字面量 —— 回滚时无法确认"跑的是哪个 tag"，发布也就不可追溯。
-var Version = "v2.1.0"
+var Version = "v2.1.1"
 
 var startTime = time.Now()
 
