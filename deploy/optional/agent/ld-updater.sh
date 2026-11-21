@@ -527,44 +527,43 @@ EOF
 # hash_of 输出文件的 sha256；没有 sha256sum 时输出空串（两处比较都退化成"跳过"）。
 hash_of() { sha256sum "$1" 2>/dev/null | cut -d' ' -f1; }
 
-# check_self_outdated 提示"仓库里的 agent 已经比正在跑的新"。
+# heal_self 把运行副本换成仓库里的那份，然后正常退出、由 systemd 拉起新的一份。
 #
-# 为什么需要这个提示：agent 的运行副本故意放在仓库之外（`/opt/lingdong/updater`，
-# 否则更新过程的 checkout 会改写正在执行的脚本）。代价是**升级应用不会升级 agent**，
-# 于是 agent 里的 bug 修复（比如 psql 的 SQL 通道）不重装就永远不生效，
-# 而症状是"点了更新没反应"——没人会想到去对比两个文件的哈希。
-check_self_outdated() {
-  local src="$REPO_PATH/deploy/optional/agent/ld-updater.sh"
-  [ -f "$src" ] || return 0
-  command -v sha256sum >/dev/null 2>&1 || return 0
-  if [ "$(hash_of "$src")" != "$(hash_of "$0")" ]; then
-    warn "更新程序与仓库版本不一致：执行 sudo bash deploy/ld.sh updater 让它生效"
-  fi
-}
-
-# self_heal 在**跑完一次更新之后**把自己换成仓库里的新版本。
+# 两个调用点，同一个动作：
+#   - 启动时（heal_self warn）：应用已经升级到带新 agent 的版本，这里立刻跟上，
+#     不必等用户去点一次更新、也不必等谁去看 journalctl；
+#   - 一条任务跑完之后（heal_self log）：刚才的 checkout 把工作区换成新 tag，
+#     agent 也跟着新了。
 #
-# 更新过程会 checkout 到目标 tag，仓库里的 ld-updater.sh 也跟着变成新版本了，
-# 但正在跑的是启动时读进内存的旧代码。此时直接 exec 新脚本，就让 agent 的修复
-# 跟着应用更新一起生效 —— 不必等人工重装（绝大多数人不会去看 journalctl 的 WARN）。
+# 为什么是"退出"而不是 `exec`：exec 换的是进程映像，换不掉旧进程 fork 出来的
+# 心跳子进程 —— 它们继承了 fd 9，flock 跟着文件描述符走，新映像 `flock -n 9`
+# 必然 FAIL「已有另一个 ld-updater 在运行」，然后 systemd 按失败重启。
+# 正常退出则由 unit 的 `Restart=always` 拉起干净进程，路径上不留一条假故障。
 #
-# 两道保险：新脚本先 `bash -n` 过一遍语法（坏脚本 exec 进去会变成 systemd 无限
-# 重启循环，因为运行副本已被覆盖），复制失败就继续用旧脚本（旧的至少能跑）。
-self_heal() {
-  local src="$REPO_PATH/deploy/optional/agent/ld-updater.sh"
-  local new old
+# 保险丝：新脚本先 `bash -n`（坏脚本重启进去会变成无限重启，因为运行副本已被
+# 覆盖），复制后再比一次哈希（源文件可能在 install 期间被 checkout 改写）。
+heal_self() {
+  local how="${1:-log}" src new old
+  src="$REPO_PATH/deploy/optional/agent/ld-updater.sh"
   [ -f "$src" ] || return 0
   command -v sha256sum >/dev/null 2>&1 || return 0
   new="$(hash_of "$src")"; old="$(hash_of "$0")"
-  [ -n "$new" ] && [ "$new" = "$old" ] && return 0
+  [ -n "$new" ] || return 0
+  [ "$new" = "$old" ] && return 0
+
+  # 新旧前 8 位：事后查"到底自愈了没有"，日志里这两串比一句"已同步"有用。
+  if [ "$how" = "warn" ]; then
+    warn "更新程序与仓库版本不一致（${old:0:8} → ${new:0:8}），自动同步"
+  else
+    log "更新程序自身有新版本（${old:0:8} → ${new:0:8}）"
+  fi
+
   bash -n "$src" 2>/dev/null || { warn "仓库里的更新程序语法不通过，保留当前版本"; return 0; }
-  # 带上新旧前 8 位：事后查"到底自愈了没有"时，日志里这两串比一句"已同步"有用。
-  log "更新程序自身有新版本（${old:0:8} → ${new:0:8}），同步后重启"
   install -m 0755 "$src" "$0" || { warn "自同步失败，继续使用当前版本"; return 0; }
-  # 复制后再比一次：源文件可能在 install 期间被 checkout 改写，那就不 exec 了（避免来回跳）。
   [ "$(hash_of "$0")" = "$new" ] || { warn "自同步后哈希仍不一致，保留当前进程"; return 0; }
-  # exec 替换进程映像：fd 9 上的 flock 仍属于本进程，重启后的 flock -n 9 依然成功。
-  exec "$0"
+
+  log "已同步，退出等待 systemd 重启"
+  exit 0
 }
 
 main() {
@@ -580,7 +579,7 @@ main() {
   flock -n 9 || die "已有另一个 ld-updater 在运行"
 
   log "启动：repo=$REPO_PATH interval=${INTERVAL}s"
-  check_self_outdated
+  heal_self warn
   trap 'stop_heartbeat' EXIT
 
   local last_seen=0
@@ -620,7 +619,7 @@ main() {
     stop_heartbeat
     log "任务 #$JOB_ID 结束"
     # 刚跑完的这次更新已经把工作区 checkout 到新 tag，仓库里的 agent 可能也新了。
-    self_heal
+    heal_self log
   done
 }
 

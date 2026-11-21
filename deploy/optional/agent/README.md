@@ -90,8 +90,18 @@ bash /opt/lingdong/updater/ld-updater.sh --dry-run --tag v2.2.0   # 只打印命
 
 ## 升级 agent 自身
 
-agent 的运行副本在 `/opt/lingdong/updater`，**升级应用不会升级它** —— 所以 agent 里的
-bug 修复不重装就永远不生效。重装就一条命令（在部署目录下）：
+agent 的运行副本在 `/opt/lingdong/updater`，而仓库里的那份（`deploy/optional/agent/`）
+会随每次应用升级一起更新。两者不一致时，agent **自己会同步**：
+
+- 启动时发现不一致 → `WARN 更新程序与仓库版本不一致（旧 → 新），自动同步` → 退出，
+  systemd 按 `Restart=always` 拉起新的一份；
+- 一条更新任务跑完之后（刚才的 `checkout` 已经把工作区换成新 tag）→ 同样自愈。
+
+所以正常情况下**什么都不用做**。需要人工介入的只有一种情况：新脚本语法检查没过
+（`bash -n`），这时会打 `WARN 仓库里的更新程序语法不通过，保留当前版本` —— 旧版本
+继续跑，问题留给人处理，不会把服务带进重启循环。
+
+想强制重装一次（比如怀疑运行副本被改过）：
 
 ```bash
 sudo bash deploy/ld.sh updater
@@ -100,19 +110,12 @@ sudo bash deploy/ld.sh updater
 它会重写运行副本、重写 unit、`daemon-reload`，然后 **restart**（不是 `enable --now`：
 服务已在跑时 `start` 是 no-op，文件换了进程还是旧代码，症状是"重装了没效果"）。
 
-判断有没有生效，两个办法：
+判断有没有生效：
 
 ```bash
 sha256sum deploy/optional/agent/ld-updater.sh /opt/lingdong/updater/ld-updater.sh  # 应相同
 systemctl show -p ActiveEnterTimestamp ld-updater --value                          # 应是刚才
 ```
 
-agent 启动时会自己做一次同样的对比，不一致就打一行：
-
-```
-WARN 更新程序与仓库版本不一致：执行 sudo bash deploy/ld.sh updater 让它生效
-```
-
-所以升级应用之后，如果 `journalctl -u ld-updater` 里出现这行，就是该重装了。
-
-注意这是**人工**动作：agent 不会更新自己（它正在执行更新）。
+**刻意不做的事**：agent 不会在"正在执行一次更新"的过程中替换自己 —— 那段时间脚本
+正在被读，换文件等于把脚下的地板抽掉。自愈只发生在启动瞬间和任务结束之后。
