@@ -20,7 +20,9 @@ on:
         required: false
 
 permissions:
-  contents: read
+  # 推送清单到 release-manifest 分支需要写权限：只读时 git push 会直接 128 退出，
+  # 而失败点在"镜像已经推成功了之后"—— 症状是镜像有、清单没更新的半截状态。
+  contents: write
   # GHCR 推送需要写包权限；公开仓库的包默认匿名可拉，用户不需要登录。
   packages: write
 

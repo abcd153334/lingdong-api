@@ -19,7 +19,7 @@ import type { ReleaseJob, ReleaseManifest } from "@/types";
 const STEP_LABEL: Record<string, string> = {
   queued: "已提交，等待更新程序领取",
   fetching: "拉取版本信息",
-  building: "构建镜像（服务正常，约 3–8 分钟）",
+  building: "准备镜像（优先拉预构建，几十秒；否则本地构建 3–8 分钟）",
   backing_up: "备份数据库",
   switching: "切换容器（服务将中断 30–60 秒）",
   verifying: "校验版本与依赖",
@@ -167,7 +167,7 @@ export function ReleaseDialog({ open, onClose }: { open: boolean; onClose: () =>
       title: `更新到 ${targetTag}？`,
       body: (
         <div className="small">
-          <p>将依次执行：拉取代码 → 环境体检 → 构建镜像（约 3–8 分钟，服务正常）→ 备份数据库 → 切换容器。</p>
+          <p>将依次执行：拉取代码 → 环境体检 → 准备镜像（优先拉预构建，几十秒）→ 备份数据库 → 切换容器。</p>
           <p>
             <b>切换瞬间管理台与 API 会中断约 30–60 秒</b>，正在进行的同步请求可能失败。
             {running > 0 ? ` 当前有 ${running} 个任务在排队或运行，异步任务不会因此丢失。` : ""}
