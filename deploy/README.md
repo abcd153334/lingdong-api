@@ -19,7 +19,16 @@ cat ~/.lingdong-admin-initial
 docker compose -f deploy/docker-compose.yml logs backend | grep 初始口令   # 备查
 ```
 
-想自己定初始口令：部署前 `export LD_BOOTSTRAP_ADMIN_PASSWORD='...'`（只在**首次创建**时生效）。
+想自己定初始口令：部署前 `export LD_BOOTSTRAP_ADMIN_PASSWORD='...'`（只在**首次创建**时生效，
+且这样建出来的账号不会被强制改密）。
+
+**重装时注意**：`~/.lingdong-admin-initial` 已存在时脚本不会覆盖（防止第二次启动把交接凭据
+冲掉）。所以 `down -v` 连数据卷删掉、库重建之后再部署，请先删掉这个文件，否则拿到的是
+**已经不存在的那个库**的口令：
+
+```bash
+rm -f ~/.lingdong-admin-initial && bash deploy/ld.sh up
+```
 
 版本号不用手写：`ld.sh up` 会读当前 checkout 的 tag 注入二进制，`/api/health` 的
 `version` 与 tag 一致；不带 tag 的 checkout（如直接下压缩包）才会落在 `dev`。
@@ -198,8 +207,12 @@ curl -sS http://127.0.0.1:8088/api/health?deep=1
 `LD_TRUSTED_PROXIES` 少了 `127.0.0.1/32`（入口与容器同机时必须信任回环）。
 
 **初始口令找不到 / 忘了？**
-只在**首次创建**时打印一次：`docker compose logs backend | grep 初始口令`。
-改过之后又忘了，只能用另一个管理员重置；没有第二个管理员时，用建号前的备份恢复。
+先看交接文件：`cat ~/.lingdong-admin-initial`（用户名 `admin`）。
+看日志是备选：`docker compose logs backend | grep 初始口令` —— 只在**首次创建**时打印一次，
+之后任何重启都不再打（随机口令长期留在日志里等于把公开口令又装回去）。
+两者都没有（文件被删、日志也被清）且库还在时，只能新建一个管理员或从上一次备份恢复；
+口令存的是 bcrypt，从库里读不出原文。
+改过之后又忘了：用另开一个管理员重置，没有第二个管理员时用建号前的备份恢复。
 
 **能不能多机部署？**
 可以，但那是可选组件：[`deploy/optional/cluster/`](optional/cluster/docker-compose.node.yml)
