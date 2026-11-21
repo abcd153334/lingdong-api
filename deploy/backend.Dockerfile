@@ -10,14 +10,18 @@
 # ---------- 阶段 1：前端产物 ----------
 FROM node:22-alpine AS web
 
-WORKDIR /web
-
 # 国内 npm 镜像（构建期网络受限环境必需）
 ENV COREPACK_NPM_REGISTRY=https://registry.npmmirror.com
 ENV npm_config_registry=https://registry.npmmirror.com
 
-# 启用 pnpm（版本由 corepack 决定；web/pnpm-lock.yaml 的 lockfileVersion 是 9.0）。
-RUN corepack enable
+# pnpm 必须**锁版本**，不能用 `corepack enable` 放任它自己解析。
+# 没有 packageManager 字段时 corepack 取内置默认版本，而 web/pnpm-lock.yaml 是 pnpm 12
+# 写的 —— 大版本不匹配时 `--frozen-lockfile` 直接失败（v2.2.0 的首次 CI 发布就挂在这里，
+# 报错只有一句 "process ... did not complete successfully"）。
+# 版本与 web/package.json 的 packageManager 字段保持一致。
+RUN npm install -g pnpm@12.14.0
+
+WORKDIR /web
 
 # 先只拷清单，让依赖层单独命中缓存：改一行前端代码不必重装依赖。
 COPY web/package.json web/pnpm-lock.yaml ./
