@@ -115,8 +115,15 @@ services:
       APP_ENCRYPTION_KEY: "${APP_ENCRYPTION_KEY:?APP_ENCRYPTION_KEY 必须显式配置，生成方式：openssl rand -hex 32}"
       # 反代网段：本编排里是 web 容器所在网段（若 edge 也跑在本机同一网络，它也在里面）。
       # 不配的后果不是"少一条日志"：所有用户会塌进同一个限流桶，登录失败锁定也会互相误伤。
+      #
+      # **必须同时含 127.0.0.1/32**：edge（宝塔/宿主 nginx）通常把请求转给 web 容器发布的
+      # 127.0.0.1:8080 端口，web nginx 再用 $proxy_add_x_forwarded_for 追加一跳，追加进去的
+      # 是它看到的 $remote_addr —— 也就是 docker-proxy 的 127.0.0.1。后端按 Gin 的规则
+      # 从右往左找第一个"不可信"地址：不信任 127.0.0.1 时，取到的就是 127.0.0.1，
+      # 于是**每个公网用户都被当成同一个 IP**（限流、验证码升级、IP 白名单、审计 IP 全废）。
+      # 信任回环是安全的：能伪造 XFF 的只有宿主机上的本机进程，而它们本来就在信任圈内。
       # 用 172.29/24 而不是 172.28/24 —— 集群编排已占用 172.28。
-      LD_TRUSTED_PROXIES: "${LD_TRUSTED_PROXIES:-172.29.0.0/24}"
+      LD_TRUSTED_PROXIES: "${LD_TRUSTED_PROXIES:-172.29.0.0/24,127.0.0.1/32}"
       # 本地文件存储根目录（storage.active=none 时的落盘路径），挂载到命名卷以便重建后保留。
       STORAGE_DIR: "${STORAGE_DIR:-/app/data}"
       # 演示数据默认不写；想在本机看演示数据时在 .env 里改成 1。

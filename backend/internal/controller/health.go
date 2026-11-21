@@ -26,11 +26,13 @@ import (
 // v2.1.4：真机部署验收修的一批部署面缺陷（脚本/编排，见 deploy/）：升级门禁不核对版本、
 // 健康检查探到别人的服务、空库备份必然失败、ld.sh 不认 COMPOSE_FILE、
 // nginx 丢端口与不压缩、preflight 假警报。
+// v2.1.5：LD_TRUSTED_PROXIES 默认值补 127.0.0.1/32 —— 缺了它，edge 与本机同机部署时
+// 所有公网用户的客户端 IP 都会退化成 127.0.0.1（限流/验证码/IP 白名单/审计全塌成一个）。
 //
 // 必须是 var：发布流程用 `-ldflags -X` 把镜像标签注入进来，而链接器**只覆盖字符串
 // var**，对 const 静默忽略。写成 const 时打出来的镜像，`/api/health.version` 永远是
 // 源码里的字面量 —— 回滚时无法确认"跑的是哪个 tag"，发布也就不可追溯。
-var Version = "v2.1.4"
+var Version = "v2.1.5"
 
 var startTime = time.Now()
 
