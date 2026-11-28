@@ -41,6 +41,27 @@ esac
 
 require_docker
 
+# 镜像与源码/编排是两套东西：upgrade 只切**镜像**，而 compose、.env.example 随 tag 变。
+# 只切镜像的结果是"跑着 v2.3.1、编排还是 v2.2.14"——新版本新增的环境变量不会传进容器
+# （2026-11-28 从 v2.2.14 引导升到 v2.3.1 实测踩到：LD_BUILTIN_PRESETS 没生效，
+#  必须手工 checkout 才补上）。
+#
+# 这里**不自动 checkout**：本脚本就在这个工作区里，执行中改写自己会让 bash 读到半截语句
+# （同一原因让执行器副本住在 /opt/lingdong/updater）。只把偏差说清楚，由人做那一步。
+if [ -d "$DEPLOY_DIR/../.git" ]; then
+  cur_tag="$(git -C "$DEPLOY_DIR/.." describe --tags --exact-match 2>/dev/null || true)"
+  if [ "$cur_tag" != "$TAG_ARG" ]; then
+    warn "源码/编排未对齐：当前 checkout=${cur_tag:-无 tag}，目标=$TAG_ARG"
+    cat <<EOF
+  镜像会切到 $TAG_ARG，但 deploy/ 下的编排与脚本仍是当前 checkout 的版本。
+  若要新编排生效（新增的环境变量、端口、依赖都在这层），先在 $(cd "$DEPLOY_DIR/.." && pwd) 执行：
+    git fetch --tags --force && git checkout $TAG_ARG
+  然后再执行一次本命令（幂等，会再备份一次）。
+
+EOF
+  fi
+fi
+
 # 镜像必须存在，否则 `up -d` 会拿旧的同名镜像或直接失败。
 # 本地没有就先试着拉发布镜像：升级/回滚的常规姿势本来就是"拉一个已发布的版本"，
 # 以前这里直接 die，用户得先手动 `TAG=… docker compose pull` 才能升级 —— README
@@ -99,6 +120,19 @@ else
 当前记录：data_epoch=${epoch_now:-unknown}
 EOF
   exit 1
+fi
+
+# 记账：upgrade 以前只切镜像、不写 .release，于是**窗口期最长的两条路**（手工升级与
+# 一键更新）走完之后，.release 仍停在上一版：agent 记的"回退点"指向更早的版本，
+# 界面上的版本信息是错的，data_epoch 保护也对着一份过期基准在比。
+# 复用 tag-release.sh 的写法，不在这里重算一遍（data_epoch 的算法只该有一处）。
+recorded="$(grep -E '^version=' "$DEPLOY_DIR/.release" 2>/dev/null | cut -d= -f2- || true)"
+if [ "$recorded" != "$TAG_ARG" ]; then
+  if bash "$SCRIPT_DIR/tag-release.sh" "$TAG_ARG" --record-only >/dev/null 2>&1; then
+    ok "已记账 deploy/.release（${recorded:-空} → $TAG_ARG）"
+  else
+    warn "写 deploy/.release 失败（不影响运行，但回退点会不准）；可手动补：bash deploy/scripts/tag-release.sh $TAG_ARG --record-only"
+  fi
 fi
 
 echo
