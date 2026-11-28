@@ -10,15 +10,16 @@ import (
 	"lingdong-api/internal/service/releasecheck"
 )
 
-// releaseCheckInterval 是自动检查新版本的节拍（6 小时）。
+// releaseCheckInterval 是自动检查新版本的兜底节拍（30 分钟）。
 //
-// 为什么不在前端定时轮询：管理台可能同时开着十个标签页，而"有没有新版本"
-// 是个全站共享的事实。放在后台单点抓取，前端继续只读缓存（`GET /admin/system/release`
-// 不出站），一个实例一天只发 4 次请求。
+// 主机制不是它：管理台打开「版本与更新」就是一次刷新动作，会用
+// `POST /admin/system/release/check` 立即出站（服务端 15s 冷却兜住连点）。
+// 这里的定时任务只负责"没人打开页面时，侧栏红点也能自己出现"。
 //
-// 为什么是 6 小时：更新提示的价值在"当天能知道"，而清单只在发版时变。
-// 更频繁只是把对方站点当心跳用。
-const releaseCheckInterval = 6 * time.Hour
+// 为什么不是 6 小时：清单在发版那一刻就变了，而"当天能知道"意味着最坏等 6 小时，
+// 实际体验是"我明明发了版，后台还是旧的"。30 分钟 = 48 次/天，对清单站点仍然可以忽略。
+// 为什么不再更短：再短就退化成拿对方站点当心跳，收益已经为零。
+const releaseCheckInterval = 30 * time.Minute
 
 // ReleaseCheckJob 定期抓一次发布清单，让侧栏版本号旁的红点自己出现。
 //

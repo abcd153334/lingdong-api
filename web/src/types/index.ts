@@ -3163,6 +3163,8 @@ export interface ReleaseManifest {
    */
   error_kind: string;
   checked_at?: string;
+  /** 这份结论距今多少秒（缓存刻意不过期，但"多久以前"要可见） */
+  age_sec?: number;
   http_status?: number;
   latest?: ReleaseLatest;
   update_available: boolean;

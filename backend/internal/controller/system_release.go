@@ -91,16 +91,46 @@ func AdminReleaseUpdate(c *gin.Context) {
 		return
 	}
 
-	// 降级必须显式确认：清单写错一个数字就会把线上换回旧版本，
-	// 而"回退"这件事有它自己的流程（回滚分支），不该由一次误点完成。
-	// 用 Version（后端自己的版本）而不是前端声称的版本。
-	if cmp, ok := releasecheck.Compare(tag, Version); ok && cmp < 0 && !req.Force {
+	svc := releaseupdate.New(db.DB)
+
+	// 更新程序必须在线。
+	//
+	// 离线提交在旧实现里是"入队成功，60 秒后被 Sweep 判 agent_offline" —— 管理员
+	// 看到的是"已提交，等待更新程序领取"，然后等一分钟得到一个失败。这条校验
+	// 不能靠前端把按钮置灰：绕过界面直接 POST 一样会入队。force 也不绕过它 ——
+	// 程序不在线，强制只等于强制失败。
+	agent, err := svc.AgentState(c.Request.Context())
+	if err != nil {
+		response.FailDef(c, errs.Internal)
+		return
+	}
+	if agent == nil || time.Since(agent.SeenAt) >= agentOnlineWindow {
+		response.FailDefMsg(c, errs.ReleaseUpdateBlocked,
+			"更新程序不在线（未安装或未启动）：在部署机执行 sudo bash deploy/ld.sh updater 后重试")
+		return
+	}
+
+	// 目标版本必须**严格高于**当前版本。
+	//
+	// 旧实现只拦 cmp < 0：同版本可以反复提交（每次都会重拉镜像、备份、重启一遍），
+	// 而当前版本不是版本号（本地构建）时任何 tag 都放行 —— 那是最不该允许的场景。
+	// 降级/重装仍留一条显式通道（force），但必须由人明确按一次。
+	cmp, comparable := releasecheck.Compare(tag, Version)
+	switch {
+	case !comparable:
+		response.FailDefMsg(c, errs.ReleaseUpdateBlocked,
+			"当前版本（"+Version+"）不是版本号，无法判断先后；请使用正式发布的镜像")
+		return
+	case cmp == 0 && !req.Force:
+		response.FailDefMsg(c, errs.ReleaseUpdateBlocked,
+			"目标版本与当前版本相同（"+Version+"）；确定要重装请强制提交")
+		return
+	case cmp < 0 && !req.Force:
 		response.FailDefMsg(c, errs.ReleaseUpdateBlocked,
 			"目标版本低于当前版本（"+Version+"）；确定要降级请强制提交")
 		return
 	}
 
-	svc := releaseupdate.New(db.DB)
 	job, err := svc.Submit(c.Request.Context(), releaseupdate.SubmitInput{
 		RequestID:   req.RequestID,
 		TargetTag:   tag,
@@ -218,6 +248,9 @@ func buildReleasePayload(ctx context.Context, check bool) (gin.H, error) {
 	}
 	if !st.CheckedAt.IsZero() {
 		manifest["checked_at"] = st.CheckedAt.Format(time.RFC3339)
+		// age_sec 让界面能说"这是 5 小时前的结论"。缓存刻意不过期，
+		// 但"多久以前"必须可见 —— 否则一次没跑成的检查会把旧版本永久留在页面上。
+		manifest["age_sec"] = int64(st.Age().Seconds())
 	}
 	if st.HTTPStatus != 0 {
 		manifest["http_status"] = st.HTTPStatus

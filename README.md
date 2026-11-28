@@ -61,7 +61,7 @@ curl -fsS http://127.0.0.1:8088/api/health
 | 备份 / 恢复 | `bash deploy/scripts/backup.sh` / `bash deploy/scripts/restore.sh` |
 | 健康检查 | `bash deploy/scripts/healthcheck.sh --expect-version <TAG> --require-db` |
 | 本地构建镜像 | `bash deploy/scripts/tag-release.sh <TAG>`（构建 + 记账，不推送） |
-| 一键更新代理 | `deploy/agent/install.sh`（systemd 常驻，不挂 `docker.sock` 进 Web） |
+| 一键更新代理 | `deploy/optional/agent/install.sh`（systemd 常驻，不挂 `docker.sock` 进 Web） |
 
 ## 开发与构建
 

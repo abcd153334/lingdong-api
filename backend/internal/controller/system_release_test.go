@@ -10,6 +10,7 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"gorm.io/driver/postgres"
@@ -79,6 +80,19 @@ func withReleaseDB(t *testing.T) *gorm.DB {
 		}
 	})
 	return gdb
+}
+
+// seedAgent 写一条"刚刚上报"的心跳。
+//
+// 提交更新现在要求更新程序在线：用例没有心跳就等于"机器上没装 ld-updater"，
+// 任何合法提交都会被 409 挡下。这层前置必须显式造出来，不能让用例靠"先跳过校验"通过。
+func seedAgent(t *testing.T, gdb *gorm.DB) {
+	t.Helper()
+	if err := gdb.Create(&model.ReleaseAgentState{
+		ID: 1, Host: "test-host", Version: Version, CurrentTag: Version, SeenAt: time.Now(),
+	}).Error; err != nil {
+		t.Fatalf("写心跳失败: %v", err)
+	}
 }
 
 func releaseCtx(t *testing.T, method, path string, body any) (*gin.Context, *httptest.ResponseRecorder) {
@@ -162,7 +176,8 @@ func TestReleaseUpdateRejectsBadTag(t *testing.T) {
 }
 
 func TestReleaseUpdateRejectsDowngrade(t *testing.T) {
-	withReleaseDB(t)
+	gdb := withReleaseDB(t)
+	seedAgent(t, gdb)
 	c, w := releaseCtx(t, http.MethodPost, "/api/admin/system/release/update",
 		map[string]any{"target_tag": "v0.9.0", "request_id": "req-downgrade"})
 	AdminReleaseUpdate(c)
@@ -171,9 +186,61 @@ func TestReleaseUpdateRejectsDowngrade(t *testing.T) {
 	}
 }
 
+// 更新程序不在线时必须在提交那一刻拒绝，而不是入队 60 秒后判 agent_offline。
+func TestReleaseUpdateRejectsAgentOffline(t *testing.T) {
+	withReleaseDB(t) // 刻意不写心跳 = 机器上没有 ld-updater
+	c, w := releaseCtx(t, http.MethodPost, "/api/admin/system/release/update",
+		map[string]any{"target_tag": nextPatchVersion(Version), "request_id": "req-offline-01"})
+	AdminReleaseUpdate(c)
+	if w.Code != http.StatusConflict {
+		t.Fatalf("离线提交应 409，实际 %d（%s）", w.Code, w.Body.String())
+	}
+	if !strings.Contains(w.Body.String(), "更新程序不在线") {
+		t.Fatalf("应说明更新程序不在线，实际 %s", w.Body.String())
+	}
+}
+
+// 同版本不得重复提交：每次都会重拉镜像、备份、重启一遍，没有任何收益。
+func TestReleaseUpdateRejectsSameVersion(t *testing.T) {
+	gdb := withReleaseDB(t)
+	seedAgent(t, gdb)
+
+	c, w := releaseCtx(t, http.MethodPost, "/api/admin/system/release/update",
+		map[string]any{"target_tag": Version, "request_id": "req-same-00001"})
+	AdminReleaseUpdate(c)
+	if w.Code != http.StatusConflict {
+		t.Fatalf("同版本应 409，实际 %d（%s）", w.Code, w.Body.String())
+	}
+
+	// force 是显式的"重装"通道：人能按，规则不替人做决定。
+	c2, w2 := releaseCtx(t, http.MethodPost, "/api/admin/system/release/update",
+		map[string]any{"target_tag": Version, "request_id": "req-same-00002", "force": true})
+	AdminReleaseUpdate(c2)
+	if w2.Code != 200 {
+		t.Fatalf("force 重装应 200，实际 %d（%s）", w2.Code, w2.Body.String())
+	}
+}
+
+// 当前版本不是版本号（本地构建）时，任何 tag 都无法判断先后 —— 必须拒绝。
+func TestReleaseUpdateRejectsUnparsableCurrentVersion(t *testing.T) {
+	gdb := withReleaseDB(t)
+	seedAgent(t, gdb)
+
+	prev := Version
+	Version = "dev"
+	t.Cleanup(func() { Version = prev })
+
+	c, w := releaseCtx(t, http.MethodPost, "/api/admin/system/release/update",
+		map[string]any{"target_tag": "v9.9.9", "request_id": "req-unparsable"})
+	AdminReleaseUpdate(c)
+	if w.Code != http.StatusConflict {
+		t.Fatalf("当前版本不可解析应 409，实际 %d（%s）", w.Code, w.Body.String())
+	}
+}
+
 func TestReleaseUpdateInProgressThenCurrent(t *testing.T) {
 	gdb := withReleaseDB(t)
-
+	seedAgent(t, gdb)
 	// 目标版本必须**从 Version 派生**：写死 "v2.2.0" 时它会随发布变成"降级"，
 	// 于是这条用例在 v2.2.11 那天开始恒红 —— 而它真正要测的是"第二条 active 冲突"。
 	first := nextPatchVersion(Version)

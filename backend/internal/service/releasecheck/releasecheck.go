@@ -77,6 +77,18 @@ type Status struct {
 // OK 报告这次检查是否拿到了可比较的结果。
 func (s Status) OK() bool { return s.Configured && s.ErrorKind == KindNone && s.Latest != nil }
 
+// Age 返回这份结果距今多久。
+//
+// 缓存本身**不会过期**：管理台 GET 必须永远有东西可显示，过期就把界面变成
+// "不知道"是更糟的体验。但管理台要能看出"这个结论是 3 分钟前的还是 5 小时前的" ——
+// 否则一次没跑成的后台检查会让页面无限期显示旧版本，而管理员无从判断。
+func (s Status) Age() time.Duration {
+	if s.CheckedAt.IsZero() {
+		return 0
+	}
+	return time.Since(s.CheckedAt)
+}
+
 // Service 是版本检查的唯一实例（进程内缓存）。
 //
 // 为什么缓存只有进程内：清单是"提示性"信息，两个副本在 15 秒窗口里可能看到

@@ -61,7 +61,7 @@ const FAIL_HINT: Record<string, string> = {
   agent_offline: "更新程序未运行（未安装或未启动）",
   agent_lost: "更新程序失去联系，本次已中止",
   interrupted_during_switch: "切换容器期间失去联系：服务可能停在新旧之间，请人工确认",
-  data_epoch_changed: "期间执行了数据迁移，不能只回退镜像",
+  data_epoch_changed: "更新已完成，但期间执行了数据迁移；回退须连带恢复备份",
 };
 
 const MANIFEST_ERROR: Record<string, string> = {
@@ -78,11 +78,24 @@ const MANIFEST_ERROR: Record<string, string> = {
 
 const BLOCKED_HINT: Record<string, string> = {
   not_configured: "配置发布清单地址后才能更新",
-  agent_offline: "更新程序未运行：在部署机执行 sudo bash deploy/agent/install.sh",
+  agent_offline: "更新程序未运行：在部署机执行 sudo bash deploy/ld.sh updater",
   already_running: "已有更新正在进行中",
   manifest_error: "先让清单检查成功",
   version_unparsable: "当前版本不是版本号（本地构建），无法判断先后",
 };
+
+/**
+ * 打开弹窗时，缓存超过这个年龄就重抓一次。
+ *
+ * 「有刷新动作就应该看到最新」是产品要求：发版后管理员打开弹窗、切回这个页面、
+ * 点重新检查，都必须立刻拿到新清单。60 秒只是防止「关掉立刻再开」连发出站；
+ * 服务端还有 15 秒冷却兜底。
+ */
+const FRESH_MS = 60_000;
+
+/** 更新结束后的「刚完成」窗口：这段时间内主按钮是「刷新页面」。 */
+const JUST_FINISHED_MS = 15 * 60_000;
+
 
 function newRequestID(): string {
   const c = globalThis.crypto;
@@ -110,10 +123,17 @@ function statusTone(status: string): "success" | "warning" | "danger" | "info" {
   return "info";
 }
 
+/**
+ * data_epoch_changed 是「完成」而不是「失败」：数据迁移跑完，容器已经是新版本，
+ * 只是不能再只回退镜像。把它渲染成红色失败会让人以为升级挂了，从而重复提交或手工回退。
+ */
 function JobLine({ job }: { job: ReleaseJob }) {
+  const migrated = job.status === "manual_required" && job.failure_code === "data_epoch_changed";
   return (
     <div className="rel-line">
-      <Tag tone={statusTone(job.status)}>{STATUS_LABEL[job.status] ?? job.status}</Tag>
+      <Tag tone={migrated ? "success" : statusTone(job.status)}>
+        {migrated ? "已完成·待确认" : STATUS_LABEL[job.status] ?? job.status}
+      </Tag>
       <span className="small muted mono">{job.target_tag}</span>
       {job.finished_at ? <span className="small muted">· {timeAgo(job.finished_at)}</span> : null}
     </div>
@@ -140,10 +160,14 @@ export function ReleaseDialog({ open, onClose }: { open: boolean; onClose: () =>
   const last = current.data?.last ?? info?.update.last_job ?? null;
   const manifest: ReleaseManifest | undefined = info?.manifest;
 
-  // 打开时自动检查一次：只在"已配置且从未检查过"时触发。
-  // 用 ref 而不是依赖 checked_at 的副作用：检查失败时 checked_at 也可能为空，
-  // 靠依赖触发会变成对目标站点的连打。
+  // 打开弹窗就是一次"刷新动作"：缓存超过 60 秒就重抓一次。
+  //
+  // 旧实现只在"从未检查过"时才查（`manifest.checked_at` 有值就 return），
+  // 于是发版后页面会一直停在旧版本，直到后台 6 小时节拍或人工点「重新检查」。
+  // 用 ref 保证每次打开只触发一次：检查失败时 checked_at 也不会变，靠依赖驱动
+  // 会变成对目标站点的连打（服务端还有 15s 冷却兜底）。
   const autoTried = useRef(false);
+  const checkedAtMs = manifest?.checked_at ? Date.parse(manifest.checked_at) : 0;
   useEffect(() => {
     if (!open) {
       autoTried.current = false;
@@ -151,10 +175,11 @@ export function ReleaseDialog({ open, onClose }: { open: boolean; onClose: () =>
       return;
     }
     if (autoTried.current) return;
-    if (!manifest?.configured || manifest.checked_at) return;
+    if (!manifest?.configured) return;
+    if (checkedAtMs && Date.now() - checkedAtMs < FRESH_MS) return;
     autoTried.current = true;
     check.mutate();
-  }, [open, manifest?.configured, manifest?.checked_at, check]);
+  }, [open, manifest?.configured, checkedAtMs, check]);
 
   const targetTag = manifest?.latest?.tag ?? "";
   const blocked = info?.update.blocked_reason ?? "";
@@ -185,9 +210,13 @@ export function ReleaseDialog({ open, onClose }: { open: boolean; onClose: () =>
         onSuccess: () => toast.success("已提交，正在等待更新程序领取"),
         onError: (err) => {
           const e = err as ApiError;
-          // 被"同版本刚失败过 / 降级"挡下时，给一次显式强制提交的机会：
+          // 被"同版本刚失败过 / 同版本重装 / 降级"挡下时，给一次显式强制提交的机会：
           // 规则由后端给，人要有最终决定权，否则一条写错的清单就让人无路可走。
-          if (e?.errorCode === "release_update_blocked") setForce(true);
+          // 「更新程序离线」不给这条路 —— force 只能绕过版本规则，强制一个不在线的
+          // 程序等于强制失败，按钮变「强制更新」只会误导人再点一次。
+          if (e?.errorCode === "release_update_blocked" && !String(e.message ?? "").includes("更新程序")) {
+            setForce(true);
+          }
           toast.error(e?.message || "提交失败");
         },
       },
@@ -209,21 +238,42 @@ export function ReleaseDialog({ open, onClose }: { open: boolean; onClose: () =>
     });
   };
 
-  const justSucceeded = !active && last?.status === "success";
+  // 「刚更新完」必须同时满足三件事：同一版本、最近 15 分钟、终态是成功或迁移完成。
+  //
+  // 旧实现只判 `last.status === "success"`，而 last 是"最近一条终态任务、没有时间窗口"：
+  // 一次成功更新会让这个分支永久为真，把「立即更新 / 重新检查」全部短路掉 ——
+  // 新版本出来了，按钮却永远不出现。这也正是线上只剩「关闭 / 刷新页面」的原因。
+  const finishedAtMs = last?.finished_at ? Date.parse(last.finished_at) : 0;
+  const finishedThisVersion = Boolean(last && last.target_tag === info?.current.version);
+  const justFinished =
+    !active &&
+    finishedThisVersion &&
+    finishedAtMs > 0 &&
+    Date.now() - finishedAtMs < JUST_FINISHED_MS &&
+    (last?.status === "success" || last?.status === "manual_required");
+
+  // 数据迁移型终态：更新**已经完成**，只是不能再只回退镜像。
+  // 单独渲染成一条说明，避免落进下面的红色失败块。
+  const completedWithMigration =
+    last?.status === "manual_required" && last?.failure_code === "data_epoch_changed";
+
+  // 按钮**并列**而不是互斥：任何状态下都保留「重新检查」，
+  // 否则界面会滑进"只有一个关闭按钮"的死角（旧实现就是这样）。
   const actions: DialogAction[] = [{ label: "关闭", onClick: onClose }];
   if (active) {
     if (active.status === "queued") actions.push({ label: "取消更新", onClick: () => void onCancel(active) });
-  } else if (justSucceeded) {
-    // 新版本的前端 chunk 与 index.html 都变了：必须整页重载，否则会用到已删除的旧 chunk。
-    actions.push({ label: "刷新页面", variant: "primary", onClick: () => window.location.reload() });
   } else {
     if (manifest?.update_available) {
       actions.push({
         label: force ? "强制更新" : "立即更新",
-        variant: "primary",
+        variant: justFinished ? "default" : "primary",
         disabled: !canUpdate || update.isPending,
         onClick: () => void onUpdate(),
       });
+    }
+    if (justFinished) {
+      // 新版本的前端 chunk 与 index.html 都变了：必须整页重载，否则会用到已删除的旧 chunk。
+      actions.push({ label: "刷新页面", variant: "primary", onClick: () => window.location.reload() });
     }
     actions.push({
       label: check.isPending ? "检查中…" : "重新检查",
@@ -259,7 +309,10 @@ export function ReleaseDialog({ open, onClose }: { open: boolean; onClose: () =>
           {manifest?.checked_at ? (
             <div className="cd-kv-row">
               <span className="k">上次检查</span>
-              <span className="v small muted">{formatDateTime(manifest.checked_at)}</span>
+              <span className="v small muted">
+                {formatDateTime(manifest.checked_at)}
+                {(manifest.age_sec ?? 0) > 600 ? "（可能已过期）" : ""}
+              </span>
             </div>
           ) : null}
         </div>
@@ -321,7 +374,17 @@ export function ReleaseDialog({ open, onClose }: { open: boolean; onClose: () =>
           </div>
         ) : null}
 
-        {!active && last ? (
+        {!active && completedWithMigration && last ? (
+          <div className="rel-sec">
+            <JobLine job={last} />
+            <div className="small muted">
+              更新已完成，容器已经运行新版本。期间执行了数据迁移，所以如需回退必须连带恢复备份，
+              不能只回退镜像。确认无误后点下方「刷新页面」加载新界面。
+            </div>
+          </div>
+        ) : null}
+
+        {!active && last && !completedWithMigration ? (
           <div className="rel-sec">
             <JobLine job={last} />
             <div className="small muted">{last.message}</div>
@@ -340,7 +403,8 @@ export function ReleaseDialog({ open, onClose }: { open: boolean; onClose: () =>
 
         {force ? (
           <div className="rel-warn">
-            上次提交被拒（可能是同一版本刚失败过，或目标版本低于当前版本）。确认要继续时点「强制更新」。
+            上次提交被拒（可能是同一版本刚失败过、与当前版本相同，或目标版本低于当前版本）。
+            确认要继续时点「强制更新」。
           </div>
         ) : null}
 
