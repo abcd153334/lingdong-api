@@ -170,3 +170,39 @@ describe("渠道编辑抽屉的密钥区", () => {
     expect(h.keysOpened).toEqual([]);
   });
 });
+
+describe("渠道编辑抽屉的官网区", () => {
+  it("回填自己配置的官网，并在 Base URL 旁给出可跳转的外链", async () => {
+    renderForm(channel({ website: "https://duomiapi.com", website_url: "https://duomiapi.com" }));
+    const drawer = await screen.findByRole("dialog", { name: /编辑渠道/ });
+
+    const input = drawer.querySelector("#chz-site") as HTMLInputElement;
+    expect(input.value).toBe("https://duomiapi.com");
+
+    const go = drawer.querySelector(".field-row__go") as HTMLAnchorElement;
+    expect(go.getAttribute("href")).toBe("https://duomiapi.com");
+    expect(go.getAttribute("target")).toBe("_blank");
+    expect(go.getAttribute("rel")).toContain("noopener");
+  });
+
+  it("官网为空且适配器无默认时不渲染按钮；输入合法地址后才出现", async () => {
+    renderForm(channel());
+    const drawer = await screen.findByRole("dialog", { name: /编辑渠道/ });
+    expect(drawer.querySelector(".field-row__go")).toBeNull();
+
+    fireEvent.change(drawer.querySelector("#chz-site")!, { target: { value: "https://example.com" } });
+    const go = drawer.querySelector(".field-row__go") as HTMLAnchorElement;
+    expect(go.getAttribute("href")).toBe("https://example.com");
+  });
+
+  it("保存时 website 恒提交（清空 = 空串，不是省略）", async () => {
+    renderForm(channel({ website: "https://old.example.com" }));
+    const drawer = await screen.findByRole("dialog", { name: /编辑渠道/ });
+
+    fireEvent.change(drawer.querySelector("#chz-site")!, { target: { value: "" } });
+    fireEvent.click(within(drawer).getByRole("button", { name: "保存" }));
+
+    await waitFor(() => expect(h.updateCalls).toHaveLength(1));
+    expect(h.updateCalls[0].website).toBe("");
+  });
+});

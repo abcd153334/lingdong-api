@@ -131,8 +131,7 @@ test.describe("S20 真实后端联调", () => {
     await expect(page.getByText("今日请求")).toBeVisible(REAL_TIMEOUT);
     await expect(page.getByText("成功率", { exact: true })).toBeVisible(REAL_TIMEOUT);
 
-    // 模型服务：右栏是"某条渠道的模型"，所以先落到一条渠道（真实库里渠道由种子/运营建）。
-    // 没有渠道时页面停在引导态 —— 这里直接进页面断言两栏骨架，不假设库里有什么。
+    // 模型服务：默认就是「全部模型」（跨渠道），不需要先选渠道 —— 直接断言两栏骨架。
     await page.goto("/admin/model-service");
     await expect(page.getByRole("heading", { level: 1 })).toHaveText("模型服务");
     await expect(page.locator(".ms-rail")).toBeVisible(REAL_TIMEOUT);
@@ -143,7 +142,7 @@ test.describe("S20 真实后端联调", () => {
     // kling-v3 / gpt-image-2 这些），用例就红，而页面本身完全正常。
     // 「有真实行」已足够区分真假：同页的桩件用例返回空载荷，这张表恒为空态。
     // 左栏至少列出内置适配器（随进程发布，不依赖库里的渠道）
-    await expect(page.locator(".ms-grp").first()).toBeVisible(REAL_TIMEOUT);
+    await expect(page.locator(".ms-adp").first()).toBeVisible(REAL_TIMEOUT);
   });
 
   /**

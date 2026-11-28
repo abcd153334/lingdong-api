@@ -2041,6 +2041,38 @@ input[readonly] {
   background: var(--card-2);
   color: var(--t3);
 }
+/* 输入框右侧带附属动作（渠道官网跳转）：容器分配宽度，输入框让出按钮的 34px。
+   选择器必须带 input[type="text"]：全局 input{width:100%} 是 (0,1,1)，
+   单类选择器打不过它，表现是按钮被挤出容器、或输入框压住按钮。 */
+.field-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.field-row > input[type="text"] {
+  flex: 1 1 auto;
+  min-width: 0;
+  width: auto;
+}
+.field-row__go {
+  flex: 0 0 34px;
+  width: 34px;
+  height: 34px;
+  display: grid;
+  place-items: center;
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  color: var(--t2);
+  background: var(--card);
+}
+.field-row__go:hover {
+  border-color: var(--primary);
+  color: var(--primary);
+}
+.field-row__go:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 1px;
+}
 /* 勾选框/单选：只统一主题色与指针，不改尺寸——.switch 依赖隐藏 input 铺满整块热区，
    任何 width/height 覆盖都会破坏其点击范围。 */
 input[type="checkbox"],
@@ -2201,6 +2233,10 @@ textarea {
    决定画在上沿还是下沿）；这里必须留一条声明，否则 X7「未定义 CSS 变量」会红。 */
 .pop--arrow {
   --pop-arrow-x: 24px;
+  /* 尖角的纵向位置：只有 `prefer="right"`（左缘尖角）会写它，其余形态不读。
+     必须在这里给出定义 —— X7 要求每个自定义属性都有来源声明，靠 var() 的第二参数
+     兜底不算（门禁按声明名匹配）。 */
+  --pop-arrow-y: 20px;
   overflow: visible;
   border-radius: var(--r-lg);
 }
@@ -2222,6 +2258,13 @@ textarea {
   top: auto;
   bottom: -6px;
   transform: translateX(-50%) rotate(225deg);
+}
+/* 尖角在左缘（`prefer="right"` 的二级导航面板）：纵向位置由 --pop-arrow-y 给，
+   默认值必须写进 var() 的兜底里 —— 自定义属性漏定义不会报错，尖角会静默消失。 */
+.pop--arrow-left::before {
+  top: var(--pop-arrow-y, 20px);
+  left: -6px;
+  transform: translateY(-50%) rotate(-45deg);
 }
 .pop:focus {
   /* 面板自身 tabIndex=-1 只是为了让 Esc/焦点环工作，不该画出焦点框 */
@@ -2363,6 +2406,20 @@ textarea {
   gap: 10px;
   justify-content: flex-end;
   flex-shrink: 0;
+}
+/* 页脚左侧附加动作（模型弹窗的「上游参考价」）：把辅助入口推到最左，保存类动作仍在右。 */
+.dialog .dl-foot__start {
+  margin-right: auto;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+/* 上游参考价面板：每个价格单元格 = 折算价 / 上游原价 / 填入（竖排、右对齐） */
+.price-ref-cell {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 2px;
 }
 .drawer .dr-head {
   padding: 18px 22px;
@@ -4919,6 +4976,18 @@ a.uc-stat:hover .v {
   .dialog .dl-foot .btn {
     flex: 1;
   }
+  /* 四个按钮在 375px 会互相压字（每个仅 76px，「上游参考价」需约 99px、「删除模型」需 86px）。
+     辅助入口独占一行，主操作在第二行等分 —— 不缩小字号、不截断文案。 */
+  .dialog .dl-foot--split {
+    flex-wrap: wrap;
+  }
+  .dialog .dl-foot--split .dl-foot__start {
+    flex: 1 0 100%;
+    margin-right: 0;
+  }
+  .dialog .dl-foot--split .dl-foot__start .btn {
+    width: 100%;
+  }
   .grid-2,
   .grid-3,
   .grid-4 {
@@ -5368,26 +5437,6 @@ textarea.src {
 }
 
 /* ---------- 管理台·渠道绑定行与分组 ---------- */
-.bind-item {
-  display: flex;
-  gap: 10px;
-  align-items: center;
-  padding: 9px 11px;
-  border: 1px solid var(--border);
-  border-radius: var(--r-sm);
-  margin-bottom: 8px;
-  font-size: 12.5px;
-  flex-wrap: wrap;
-  background: var(--card-2);
-}
-.bind-item .bm {
-  font-family: var(--mono);
-}
-.bind-item .alias {
-  color: var(--t3);
-  font-family: var(--mono);
-  font-size: 11.5px;
-}
 .groups-box {
   display: flex;
   gap: 14px;

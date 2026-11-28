@@ -77,10 +77,14 @@ type Model struct {
 	MaxOutputTokens int `gorm:"column:max_output_tokens;not null;default:0"`
 	// Version 是乐观锁版本号（AI 提案 apply 与管理台改价 CAS 用）。
 	// 绑定变更也算模型状态变更 → 同样 +1，否则「先改绑定再 apply 改价」会覆盖绑定的新状态。
-	Version   int            `gorm:"column:version;not null;default:1"`
-	CreatedAt time.Time      `gorm:"column:created_at;type:timestamptz"`
-	UpdatedAt time.Time      `gorm:"column:updated_at;type:timestamptz"`
-	DeletedAt gorm.DeletedAt `gorm:"column:deleted_at;index;type:timestamptz"`
+	Version int `gorm:"column:version;not null;default:1"`
+	// PresetGroup 是「出厂预设组」标记（如 "builtin.duomi"）；"" = 非内置。
+	//
+	// 只有预设新建/精确认领的行才写。恢复出厂按它筛行，运营自建模型永远不受影响。
+	PresetGroup string         `gorm:"column:preset_group;size:64;not null;default:''"`
+	CreatedAt   time.Time      `gorm:"column:created_at;type:timestamptz"`
+	UpdatedAt   time.Time      `gorm:"column:updated_at;type:timestamptz"`
+	DeletedAt   gorm.DeletedAt `gorm:"column:deleted_at;index;type:timestamptz"`
 }
 
 func (Model) TableName() string { return "models" }

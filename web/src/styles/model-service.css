@@ -11,9 +11,11 @@
    本文件只用 tokens.css 里**已定义**的变量（--card-2/--t2/--t3 在 tokens.css:41,51,52
    都有定义，别再照抄"它们未定义"的旧说法）。
 
-   **左栏的行度量对标全局侧栏**（components.css 的 `.a-side .nav-row`：40px / 13.5px /
-   圆角 --r-sm / hover 与选中只有一种色块语言）。改左栏行高或字号时必须同时看那一处，
-   两套节奏并存就是"左栏像另一个产品"的来源。
+   **左栏 = 200px 的适配器卡片，不是级联列表**（2026-11 改）：渠道不在栏里展开，
+   而是点卡片后在栏右缘浮出二级面板。200px 下卡片的可用宽度只有 159px
+   （200 − 列表 padding 20 − 卡片 padding 18），行 1 扣掉图标 26 + 间距 8 + 箭头 14
+   只剩约 109px ≈ 8 个汉字 —— 所以名称必须 ellipsis + title，且**行 1 不放任何徽标**，
+   全名放在浮层标题里。这是"卡片两行"这个形状的唯一原因，改宽度前先重算这串数。
    ============================================================ */
 .a-layout:has(.ms-ws) {
   height: 100vh;
@@ -45,7 +47,8 @@
      渠道：  margin-left 11 + border 1 + padding-left 10 → 内容 x=44 → 图标 x=44 → name x=70
    两级图标同一列、文字同一列 —— 这是"级联"与"两段无关列表"的唯一区别。 */
 .ms-rail {
-  width: 300px;
+  /* 200px 是量出来的下限：再窄卡片名称只剩 5 个字，再宽就把模型表挤到 3 列 */
+  width: 200px;
   flex-shrink: 0;
   display: flex;
   flex-direction: column;
@@ -110,32 +113,24 @@
   outline-offset: -2px;
 }
 
-.ms-grp {
+/* 顶部固定区：「全部模型」入口 + 「适配器」小标题。**不随列表滚动** ——
+   它是默认视图的入口，滚动几屏之后还应该在同一个位置。 */
+.ms-rail__top {
+  flex-shrink: 0;
+  padding: 8px 8px 2px;
   display: flex;
   flex-direction: column;
-}
-/* 组间距必须明显大于组内行距（1px），否则邻近性把层级糊掉 */
-.ms-grp + .ms-grp {
-  margin-top: 10px;
-}
-.ms-grp__head {
-  display: flex;
-  align-items: center;
   gap: 2px;
 }
-/* 适配器行：与 .a-side .nav-row 同度量（40px / 13.5px / 圆角 10 / 15ms 过渡） */
-.ms-gh {
-  flex: 1;
-  min-width: 0;
+.ms-all {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 9px;
   height: 40px;
-  padding: 0 12px;
-  margin: 2px 0;
-  border: 0;
-  background: transparent;
+  padding: 0 9px;
+  border: 1px solid transparent;
   border-radius: var(--r-sm);
+  background: none;
   color: var(--t1);
   font: inherit;
   font-size: 13.5px;
@@ -144,177 +139,307 @@
   cursor: pointer;
   transition: 0.15s;
 }
-.ms-gh:hover {
+.ms-all:hover {
   background: var(--bg-2);
 }
-.ms-gh:focus-visible {
+.ms-all:focus-visible {
   outline: 2px solid var(--primary);
   outline-offset: -2px;
 }
-/* 收起的组里还留着当前选中的渠道时，只给字色 —— 复用它侧栏 `.nav-group.on` 的语义 */
-.ms-gh.is-focus {
+/* 选中 = "右栏正在看全部模型"。与卡片的 data-open（浮层开着）用同一种底，
+   但两者不会同时出现（浮层开着意味着没在全部模型视图），不构成歧义。 */
+.ms-all[aria-current="true"] {
+  background: var(--primary-bg);
+  border-color: var(--primary-bg);
   color: var(--primary);
 }
-.ms-gh__caret {
-  flex-shrink: 0;
-  color: var(--t3);
-  transition: transform 0.15s ease;
-}
-/* chevronDown：展开朝下、收起转 -90° 变 ▸，与 .nav-caret.closed 同一手势 */
-.ms-gh:not(.is-open) .ms-gh__caret {
-  transform: rotate(-90deg);
-}
-.ms-gh__label {
-  flex: 1;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-/* 组头只放结构性元数据：纯文字，不做胶囊（行内状态才用 Tag） */
-.ms-gh__tag {
-  flex-shrink: 0;
-  font-size: 11px;
-  font-weight: 400;
-  color: var(--t2);
-}
-.ms-gh__tag.is-off {
-  color: var(--warning);
-}
-.ms-gh__count {
-  flex-shrink: 0;
-  font-size: 11.5px;
-  font-weight: 400;
-  color: var(--t2);
-  font-variant-numeric: tabular-nums;
-}
-.ms-gh__add {
-  width: 26px;
-  height: 26px;
-  flex-shrink: 0;
-  display: grid;
-  place-items: center;
-  border: 0;
-  background: transparent;
-  border-radius: 6px;
-  color: var(--t2);
-  cursor: pointer;
-}
-.ms-gh__add:hover {
-  color: var(--t1);
-  background: var(--bg-2);
-}
-.ms-gh__add:focus-visible {
-  outline: 2px solid var(--primary);
-  outline-offset: -2px;
-}
-/* 孤儿桶的组头不可点：用 padding 补出 caret 的宽度，让 alert 图标仍落在 x=44 */
-.ms-gh--static {
-  padding-left: 34px;
-  cursor: default;
-}
-.ms-gh--static .ms-gh__label {
-  color: var(--t2);
-  font-weight: 600;
-}
-.ms-gh__warn {
-  flex-shrink: 0;
-  color: var(--warning);
-}
-
-/* 渠道组：缩进 + 1px 导轨表达父子（与 .nav-sub 同一几何语言） */
-.ms-chs {
-  display: flex;
-  flex-direction: column;
-  gap: 1px;
-  margin-left: 11px;
-  padding-left: 10px;
-  padding-bottom: 2px;
-  /* 导轨用 --border-h 而不是 --border：后者贴白卡够看，贴 --bg 时对比只有 1.1:1，
-     整条线等于不存在 —— 级联的父子关系就只剩"缩进了几像素"这一条线索。 */
-  border-left: 1px solid var(--border-h);
-}
-.ms-ch {
+.ms-rail__label {
   display: flex;
   align-items: center;
   gap: 8px;
-  height: 36px;
-  padding: 0 12px;
-  margin: 1px 0;
-  border: 0;
-  background: transparent;
+  padding: 8px 9px 4px;
+  font-size: 11px;
+  color: var(--t3);
+  letter-spacing: 0.06em;
+}
+.ms-rail__label::after {
+  content: "";
+  flex: 1;
+  height: 1px;
+  background: var(--border);
+}
+.ms-rail__cards {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+/* 适配器卡片：两行 grid。
+   行 1 = 图标 / 名称 / `›`；行 2（跨 2-3 列）= 渠道数 · 内置|已停用。
+   间距 6px 必须明显大于旧的 1px 行距：卡片靠留白分组，不靠缩进。 */
+.ms-adp {
+  display: grid;
+  grid-template-columns: 26px minmax(0, 1fr) 14px;
+  column-gap: 8px;
+  row-gap: 1px;
+  align-items: center;
+  width: 100%;
+  padding: 8px 9px;
+  background: var(--card);
+  border: 1px solid var(--border);
   border-radius: var(--r-sm);
-  color: var(--t2);
+  color: var(--t1);
   font: inherit;
-  font-size: 13px;
-  font-weight: 400;
+  text-align: left;
+  cursor: pointer;
+  transition: 0.18s;
+}
+.ms-adp:hover {
+  background: var(--row-hover);
+  border-color: var(--border-h);
+}
+.ms-adp:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: -2px;
+}
+/* 浮层开着的那张卡：主色底 + 主色描边，与面板连成一体。 */
+.ms-adp[data-open] {
+  background: var(--primary-bg);
+  border-color: var(--primary);
+}
+/* 右栏正在看它下面的渠道：只吃主色文字，不抢实心底 ——
+   两个状态可能同时出现在两张卡上，都画成实心就分不出哪个是当前视图。 */
+.ms-adp[aria-current="true"] {
+  color: var(--primary);
+  font-weight: 600;
+}
+.ms-adp[aria-current="true"] .ms-adp__meta {
+  color: var(--primary);
+  opacity: 0.75;
+}
+.ms-adp__ico {
+  width: 26px;
+  height: 26px;
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  background: var(--card-2);
+  color: var(--t2);
+  overflow: hidden;
+}
+.ms-adp__ico .ent-icon {
+  width: 22px;
+  height: 22px;
+}
+.ms-adp__ico--warn {
+  background: var(--warning-bg);
+  color: var(--warning);
+}
+.ms-adp__name {
+  font-size: 12.5px;
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.ms-adp__chev {
+  justify-self: end;
+  color: var(--t3);
+}
+.ms-adp[data-open] .ms-adp__chev {
+  color: var(--primary);
+}
+.ms-adp__meta {
+  grid-column: 2 / -1;
+  display: flex;
+  gap: 6px;
+  font-size: 11px;
+  color: var(--t3);
+  white-space: nowrap;
+  overflow: hidden;
+}
+.ms-adp__meta .is-off {
+  color: var(--warning);
+}
+/* 孤儿桶：虚线边框 + 警示图标，一眼区别于正常适配器（它不可"新建渠道"）。 */
+.ms-adp--orphan {
+  border-style: dashed;
+  border-color: var(--border-h);
+}
+
+/* ---------------- 渠道浮层（贴左栏右缘） ----------------
+   宽度 320 是量出来的：900px 视口下「200 栏 + 320 面板」还剩 380 给表格，
+   再宽表格就只剩两列。≤1179 收到 288，把 32px 还给表格。 */
+.ms-fly {
+  width: 320px;
+  /* `.pop--arrow` 默认四角 r-lg；这里左缘贴住左栏，必须压平 ——
+     否则上下两个圆角在栏边上各留一个缺口，"连成一体"就不成立。 */
+  border-radius: 0 var(--r-md) var(--r-md) 0;
+}
+.ms-fly__head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 9px 8px 9px 12px;
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+.ms-fly__title {
+  min-width: 0;
+  font-size: var(--fs-md);
+  font-weight: 600;
+  color: var(--t1);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.ms-fly__sub {
+  flex-shrink: 0;
+  font-size: 11px;
+  color: var(--t3);
+  font-family: var(--mono);
+}
+.ms-fly__list {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.ms-fly__foot {
+  flex-shrink: 0;
+  padding: 8px;
+  border-top: 1px solid var(--border);
+}
+.ms-fly__foot .btn {
+  width: 100%;
+}
+/* 孤儿桶底部不是按钮而是一句说明：那里没有可建渠道的适配器 */
+.ms-fly__note {
+  margin: 0;
+  padding: 9px 10px;
+  border-radius: var(--r-sm);
+  background: var(--warning-bg);
+  color: var(--t2);
+  font-size: 11.5px;
+  line-height: 1.65;
+}
+
+/* 渠道卡片：名称 + 状态 / 地址 / 元信息。整张是按钮，内部只用 span。 */
+.ms-flych {
+  display: block;
+  width: 100%;
+  padding: 9px 10px;
+  background: var(--card-2);
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  color: inherit;
+  font: inherit;
   text-align: left;
   cursor: pointer;
   transition: 0.15s;
 }
-.ms-ch:hover {
+.ms-flych:hover {
+  background: var(--row-hover);
+  border-color: var(--border-h);
+}
+.ms-flych:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: -2px;
+}
+.ms-flych[aria-current="true"] {
+  border-color: var(--primary);
+  background: var(--primary-bg);
+}
+.ms-flych__t {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+.ms-flych__t b {
+  min-width: 0;
+  font-size: 12.5px;
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.ms-flych__t .tag {
+  flex-shrink: 0;
+}
+.ms-flych__url {
+  display: block;
+  margin-top: 3px;
+  font-size: 11px;
+  color: var(--t2);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.ms-flych__meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 4px;
+  font-size: 11px;
+  color: var(--t3);
+}
+
+/* 抽屉钻取（≤899）：同一块地方换内容，不叠第二层 Sheet。 */
+.ms-drill__top {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+.ms-drill__top b {
+  min-width: 0;
+  font-size: 12.5px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.ms-drill__list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 8px;
+}
+.ms-rail__foot .ms-rail__new {
+  width: 100%;
+}
+
+/* 「恢复出厂」入口：维护类动作，比「新建适配器」再弱一级（更小的字、无图标）。
+   放在 foot 而不是顶栏，是因为它作用的对象是"所有内置行"，不属于当前选中的适配器。 */
+.ms-reset {
+  width: 100%;
+  height: 30px;
+  margin-top: 2px;
+  padding: 0 12px;
+  border: 0;
+  background: transparent;
+  border-radius: var(--r-sm);
+  color: var(--t3);
+  font: inherit;
+  font-size: 12px;
+  text-align: left;
+  cursor: pointer;
+  transition: 0.15s;
+}
+.ms-reset:hover {
   color: var(--t1);
   background: var(--bg-2);
 }
-.ms-ch:focus-visible {
+.ms-reset:focus-visible {
   outline: 2px solid var(--primary);
   outline-offset: -2px;
-}
-/* 选中态与侧栏 `.nav-item.active` 逐条同款：底色 + 主色 + 字重。
-   **不画左侧竖条**：components.css 明令那条 inset 是后台模板的通用装饰，
-   admin-chrome.spec 还有 `boxShadow === "none"` 的断言。 */
-.ms-ch[aria-current="true"] {
-  color: var(--primary);
-  background: var(--primary-bg);
-  font-weight: 600;
-}
-.ms-ch__name {
-  flex: 1;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.ms-ch__meta {
-  flex-shrink: 0;
-  font-size: 11.5px;
-  color: var(--t2);
-  white-space: nowrap;
-}
-.ms-ch__meta.is-off {
-  color: var(--warning);
-}
-/* 固定槽：组内最后一项，虚线边框表示"这里还能加一个" */
-.ms-add-dashed {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 5px;
-  height: 32px;
-  margin-top: 2px;
-  padding: 0 8px;
-  border: 1px dashed var(--border-h);
-  border-radius: var(--r-sm);
-  background: transparent;
-  color: var(--t2);
-  font: inherit;
-  font-size: 12.5px;
-  cursor: pointer;
-}
-.ms-add-dashed:hover {
-  border-color: var(--primary);
-  color: var(--primary);
-}
-.ms-add-dashed:focus-visible {
-  outline: 2px solid var(--primary);
-  outline-offset: -2px;
-}
-.ms-grp__note {
-  margin: 2px 0 0;
-  /* 60 = 10（列表内边距）+ 34（补 caret 宽）+ 16，与组头文字左边界对齐 */
-  padding: 0 8px 4px 60px;
-  font-size: 11.5px;
-  color: var(--t2);
 }
 
 /* 抽屉遮罩：页内绝对定位，**不用全局 .mask**（那是 fixed，会连 768–899 常驻的
@@ -355,6 +480,25 @@
 .ms-chanbar__id b {
   font-size: var(--fs-md);
 }
+/* 渠道条上的官网页：22px 跟随小字，不参与四个动作按钮的排布（actions 已有 4 个） */
+.ms-chanbar__site {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 22px;
+  height: 22px;
+  border-radius: var(--r-sm);
+  color: var(--t3);
+}
+.ms-chanbar__site:hover {
+  color: var(--primary);
+  background: var(--primary-bg);
+}
+.ms-chanbar__site:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 1px;
+}
 .ms-chanbar__note {
   font-size: 11.5px;
   opacity: 0.6;
@@ -377,9 +521,20 @@
 }
 
 /* ---------------- 窄屏 ---------------- */
+/* 900px 下「200 左栏 + 剩余」只剩约 470px：单元格默认 14px 的左右内边距在 6 列上
+   要吃掉 168px，加上模型列的名称+ID 就会把「状态」挤到吸右操作列底下。收到 8px
+   能把 模型/绑定渠道/状态/操作 全部留在可视区内（表格本身仍是可横向滚的，兜底不变）。 */
+@media (max-width: 1023px) {
+  .ms-main .tbl th,
+  .ms-main .tbl td {
+    padding: 10px 8px;
+  }
+}
+
 @media (max-width: 1179px) {
-  .ms-rail {
-    width: 260px;
+  /* 只收浮层，不收左栏：200px 已经是卡片能读的下限（见文件头算式） */
+  .ms-fly {
+    width: 288px;
   }
 }
 /* ≤899 左栏变抽屉：两栏挤在 900px 以下时，300px 的导航会让模型表只剩 4 列。
@@ -404,73 +559,6 @@
   }
   .ms-rail-toggle {
     display: inline-flex;
-  }
-}
-
-/* ---------------- 右栏 · 适配器渠道总览 ---------------- */
-/* 总览不给内部滚动（跟页面一起滚）：多一个滚动容器就多一层嵌套滚动，
-   滚到底会把整页带走，且和深链的 scrollIntoView 抢滚动位置。 */
-.ms-ov__list {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-}
-.ms-ov__row {
-  width: 100%;
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 8px 10px;
-  border: 0;
-  background: transparent;
-  border-radius: var(--r-sm);
-  color: inherit;
-  font: inherit;
-  text-align: left;
-  cursor: pointer;
-  transition: 0.15s;
-}
-.ms-ov__row:hover {
-  background: var(--bg-2);
-}
-.ms-ov__row:focus-visible {
-  outline: 2px solid var(--primary);
-  outline-offset: -2px;
-}
-.ms-ov__main {
-  flex: 1;
-  min-width: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 1px;
-}
-.ms-ov__name {
-  font-size: var(--fs-md);
-  color: var(--t1);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.ms-ov__url {
-  font-size: 11.5px;
-  color: var(--t2);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.ms-ov__meta {
-  flex-shrink: 0;
-  font-size: 11.5px;
-  color: var(--t2);
-  white-space: nowrap;
-}
-/* 窄屏优先保住名称与状态：地址是最先可以牺牲的那一条 */
-@media (max-width: 767px) {
-  .ms-ov__url {
-    display: none;
   }
 }
 
@@ -643,4 +731,84 @@
 }
 .ms-key__band .row-acts {
   justify-content: flex-end;
+}
+
+/* 模型弹窗顶部的口径说明（全局模型 / 全局价格）：常驻一行小字，不是 Hint ——
+   它讲的是"这次保存影响到谁"，属于必须留在明面的信息。 */
+.ms-note {
+  margin: 0 0 14px;
+  padding: 8px 10px;
+  border-radius: var(--r-sm);
+  background: var(--card-2);
+  line-height: 1.6;
+}
+
+/* ============================================================
+   恢复出厂弹窗（PresetRestoreDialog）
+   ============================================================ */
+/* 顶部口径说明：与 .ms-note 同族，但它是弹窗的第一行，不需要下外边距 */
+.prs-lead {
+  margin: 0 0 12px;
+  line-height: 1.7;
+}
+/* 三列计数在同一格里横排：覆盖 / 新建 / 跳过。
+   分开成三列会让表宽在 760px 弹窗里挤成豆腐块，而这三者只有合起来才有意义。 */
+.prs-cell {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 8px;
+  font-variant-numeric: tabular-nums;
+}
+.prs-n {
+  font-weight: 600;
+}
+/* 0 值要看得见但退到背景里：一列全是 0 时说明这组没有可恢复的行 */
+.prs-n.is-zero {
+  color: var(--t3);
+  font-weight: 400;
+}
+.prs-n.is-new {
+  color: var(--primary);
+}
+.prs-n.is-skip {
+  color: var(--warning);
+  font-weight: 500;
+}
+.prs-sum {
+  margin-top: 12px;
+  padding: 8px 10px;
+  border-radius: var(--r-sm);
+  background: var(--card-2);
+  font-size: 12.5px;
+}
+/* 有跳过项时的留痕：单行失败不该只留在日志里 */
+.prs-warn {
+  margin: 4px 0 0;
+  padding-left: 16px;
+  color: var(--danger);
+  font-size: 12px;
+  white-space: normal;
+}
+.prs-opt {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin-top: 14px;
+  cursor: pointer;
+}
+.prs-opt input[type="checkbox"] {
+  margin-top: 2px;
+  flex-shrink: 0;
+}
+.prs-opt .muted {
+  display: block;
+  margin-top: 2px;
+}
+.prs-err {
+  margin-top: 10px;
+  padding: 8px 10px;
+  border-radius: var(--r-sm);
+  background: var(--danger-bg);
+  color: var(--danger);
+  font-size: 12.5px;
 }

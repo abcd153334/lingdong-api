@@ -1,3 +1,5 @@
+import type { Currency } from "@/lib/money";
+
 /** 统一响应体（S0 §6.3：{code,message,data}，code=0 为成功）
  *  追加 error_code（C-06）：机器可判读的业务错误码，成功或未定义时省略 */
 export interface ApiResponse<T> {
@@ -632,6 +634,13 @@ export interface AdminModelItem extends PricingModel {
   /** 乐观锁版本号：编辑保存时必须回传，否则并发改价会静默覆盖 */
   version: number;
   /**
+   * 「出厂内置」标记（空串 = 运营自建）。
+   *
+   * 只用于展示与入口可见性：列表据此标出哪些行会被「恢复出厂」覆盖。
+   * 不是编辑开关——内置行照样能改名改价。
+   */
+  preset_group?: string;
+  /**
    * 该模型在**当前筛选渠道**上的绑定（仅 `channel_id` 过滤时下发）。
    *
    * 右栏「渠道下的模型」每一行都要显示这条渠道上的上游名/权重/启停；
@@ -756,23 +765,49 @@ export interface BindingSaveResult {
   warnings: BindingWarning[];
 }
 
-/** 上游价目源（GET /api/admin/upstream/sources） */
-export interface UpstreamSource {
+/**
+ * 上游参考价条目（GET /api/admin/upstream/search）。
+ *
+ * 双量纲是刻意的：`*_usd` 是上游挂牌价（可对账），`*_micro` 是按站点汇率折算后的
+ * 本地量纲（可直接填进 `price_*`）。两者都可为 null —— null 表示上游没报这一档，
+ * **不是 0**（0 在本地语义里是"显式免费"）。
+ */
+export interface UpstreamPriceItem {
   id: string;
   name: string;
-  ok: boolean;
-  err?: string;
+  provider_id: string;
+  provider_name: string;
+  modality: Modality;
+  deprecated: boolean;
+  /** 同名模型在多少家来源有报价（面板据此显示「另有 N 家」） */
+  provider_count: number;
+  input_usd: number | null;
+  output_usd: number | null;
+  cache_usd: number | null;
+  input_micro: number | null;
+  output_micro: number | null;
+  cache_micro: number | null;
 }
 
-/** 上游同步预览项（S6 落地真实拉取） */
-export interface UpstreamPreviewItem {
-  name: string;
-  vendor: string;
-  modality: Modality;
-  input_price: number | null;
-  output_price: number | null;
-  cache_price: number | null;
-  status: string;
+/** 本次查询的来源与口径（currency/fx_rate 是后端实际换算用的，展示符号必须取它） */
+export interface UpstreamSearchMeta {
+  source: string;
+  fetched_at: string;
+  /** true = 本次刷新失败，返回的是上一次的快照 */
+  stale: boolean;
+  currency: Currency;
+  fx_rate: number;
+  /** 实际命中的关键词（剥离日期后缀后可能与请求词不同） */
+  matched_keyword: string;
+  /** 去重后命中的模型数（含有价与无价） */
+  total: number;
+  /** 其中有公开报价的数量 */
+  with_price: number;
+}
+
+export interface UpstreamSearchResult {
+  items: UpstreamPriceItem[];
+  meta: UpstreamSearchMeta;
 }
 
 /* ------------------ S4 渠道与适配器 ------------------ */
@@ -861,6 +896,12 @@ export interface ChannelItem {
   icon_url: string;
   adapter_id: string;
   base_url: string;
+  /** 渠道自己配置的上游官网（"" = 未配置，回落到适配器默认）；编辑回填用 */
+  website?: string;
+  /** 可直接跳转的**有效**官网（自己配置的优先，否则适配器默认）；空 = 不显示跳转 */
+  website_url?: string;
+  /** 「出厂内置」标记（空串 = 运营自建）：只用于展示与「恢复出厂」入口可见性 */
+  preset_group?: string;
   multi_key_mode: MultiKeyMode;
   groups: string[];
   weight: number;
@@ -946,6 +987,8 @@ export interface AdapterInfo {
    * 已经有值的（运营手填过、或是编辑既有渠道）绝不覆盖。
    */
   default_base_url?: string;
+  /** 该适配器的默认上游官网（空 = 无默认值）；渠道表单用它做占位与跳转兜底 */
+  website?: string;
   /** 规格声明的端点（内置恒为空数组） */
   endpoints: string[];
 }
@@ -1009,6 +1052,8 @@ export interface ChannelPayload {
   icon?: string;
   adapter_id: string;
   base_url: string;
+  /** 上游官网；恒提交，空串 = 清空（回到适配器默认） */
+  website?: string;
   multi_key_mode: MultiKeyMode;
   groups: string[];
   weight: number;
@@ -3182,4 +3227,35 @@ export interface ReleaseCurrent {
   active: ReleaseJob | null;
   last: ReleaseJob | null;
   server_time: string;
+}
+
+/* --------------------------- 内置预设（恢复出厂） --------------------------- */
+
+/** 一个对象（渠道/模型/绑定）在本次恢复里的三态计数 */
+export interface PresetRestoreCounts {
+  /** 命中内置标记、被显式拉回出厂值的行 */
+  reused: number;
+  /** 出厂声明有、库里没有（或已被删除）而新建的行 */
+  created: number;
+  /** 跳过：运营自建（未认领）、同名冲突、或写失败（看 warnings） */
+  skipped: number;
+}
+
+export interface PresetRestoreGroup {
+  /** 行标记（`builtin.<slug>`），也是恢复时的 `group` 入参 */
+  group: string;
+  /** 本组渠道的出厂名（给人看的展示标签，不参与匹配） */
+  label: string;
+  channels: PresetRestoreCounts;
+  models: PresetRestoreCounts;
+  bindings: PresetRestoreCounts;
+  /** 单行失败/无法解除删除等留痕；有内容必须展示，否则"少恢复了几个"无从解释 */
+  warnings?: string[];
+}
+
+/** POST /api/admin/presets/restore 的响应 */
+export interface PresetRestoreResult {
+  /** true = 预览（已回滚），库里没有任何变化 */
+  dry_run: boolean;
+  groups: PresetRestoreGroup[];
 }

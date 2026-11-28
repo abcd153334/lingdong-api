@@ -82,11 +82,15 @@ func enablePresets(t *testing.T) {
 
 // seedModelCount / seedChannelCount 从预设声明派生期望行数（不写死数字）。
 func seedModelCount() int {
-	n := 0
+	// 模型 ID 是全局主键：同一 ID 可以出现在两组（如 duomi 与方舟都提供 seedance），
+	// 后一组只补绑定、不再建行。计数必须去重，否则会把"共享模型"算成两行。
+	seen := map[string]bool{}
 	for _, g := range presetGroups() {
-		n += len(g.Models)
+		for _, m := range g.Models {
+			seen[m.ID] = true
+		}
 	}
-	return n
+	return len(seen)
 }
 
 func seedChannelCount() int { return len(presetGroups()) }
@@ -107,17 +111,34 @@ func TestSeedWritesDisabledPresets(t *testing.T) {
 	if len(models) != seedModelCount() {
 		t.Fatalf("应写入 %d 个模型，实际 %d", seedModelCount(), len(models))
 	}
+	// 计费方式按声明逐条核对（现网导出含 tokens/call/spec 三种）。
+	modeByID := map[string]string{}
+	for _, g := range presetGroups() {
+		for _, s := range g.Models {
+			mode := s.BillingMode
+			if mode == "" {
+				mode = model.BillingModeSpec
+			}
+			modeByID[s.ID] = mode
+		}
+	}
 	for _, m := range models {
 		if m.Enabled {
 			t.Fatalf("模型 %s 必须默认停用（预置 ≠ 开通）", m.ID)
 		}
-		if m.BillingMode != model.BillingModeSpec {
-			t.Fatalf("模型 %s 应按规格计价，实际 %q", m.ID, m.BillingMode)
+		want, ok := modeByID[m.ID]
+		if !ok {
+			t.Fatalf("模型 %s 不在任何预设声明里", m.ID)
 		}
-		if len(m.Capabilities) == 0 || string(m.Capabilities) == "null" {
-			t.Fatalf("模型 %s 缺能力声明：文档侧栏会少 TAB 且无报错", m.ID)
+		if m.BillingMode != want {
+			t.Fatalf("模型 %s 计费方式应为 %q，实际 %q", m.ID, want, m.BillingMode)
 		}
-		if m.SpecPrices.Kind == "" {
+		// 能力可以合法为空（纯对话模型没有额外能力），但不能是 NULL ——
+		// NULL 表示"没声明过"，文档侧栏会少 TAB。
+		if string(m.Capabilities) == "null" {
+			t.Fatalf("模型 %s 缺能力声明（NULL）：文档侧栏会少 TAB 且无报错", m.ID)
+		}
+		if want == model.BillingModeSpec && m.SpecPrices.Kind == "" {
 			t.Fatalf("模型 %s 缺价目结构：保存期校验会直接拒", m.ID)
 		}
 	}
@@ -125,7 +146,8 @@ func TestSeedWritesDisabledPresets(t *testing.T) {
 	// 逐组断言渠道与绑定（新加一组自动被覆盖到）。
 	for _, g := range presetGroups() {
 		var ch model.Channel
-		if err := gdb.Where("adapter_id = ?", g.Channel.AdapterID).First(&ch).Error; err != nil {
+		// 按行标记找渠道：同 adapter 可能有多条（Metaso 标准/优先），按 adapter 取首条会串组。
+		if err := gdb.Where("preset_group = ?", g.RowGroup()).First(&ch).Error; err != nil {
 			t.Fatalf("未写入 %s 组的内置渠道: %v", g.MarkerKey, err)
 		}
 		if ch.Status != model.ChannelStatusDisabled {
@@ -139,16 +161,22 @@ func TestSeedWritesDisabledPresets(t *testing.T) {
 		}
 		// 出厂图标必须指向真实存在的内置 key：预设层同样绕过 brandicon.Normalize 直接写库，
 		// 写错 key 的表现是「门户上这条渠道永远显示首字」，且没有任何日志。
-		if _, err := brandicon.Normalize(ch.Icon); err != nil {
-			t.Fatalf("%s 组内置渠道图标 %q 不合法: %v", g.MarkerKey, ch.Icon, err)
+		if ch.Icon != "" {
+			if _, err := brandicon.Normalize(ch.Icon); err != nil {
+				t.Fatalf("%s 组内置渠道图标 %q 不合法: %v", g.MarkerKey, ch.Icon, err)
+			}
 		}
 
-		var vendor model.Vendor
-		if err := gdb.Where("id = ?", g.Vendor.ID).First(&vendor).Error; err != nil {
-			t.Fatalf("%s 组未写入供应商 %s: %v", g.MarkerKey, g.Vendor.ID, err)
-		}
-		if _, err := brandicon.Normalize(vendor.Icon); err != nil {
-			t.Fatalf("%s 组供应商图标 %q 不合法: %v", g.MarkerKey, vendor.Icon, err)
+		if g.Vendor.ID != "" {
+			var vendor model.Vendor
+			if err := gdb.Where("id = ?", g.Vendor.ID).First(&vendor).Error; err != nil {
+				t.Fatalf("%s 组未写入供应商 %s: %v", g.MarkerKey, g.Vendor.ID, err)
+			}
+			if vendor.Icon != "" {
+				if _, err := brandicon.Normalize(vendor.Icon); err != nil {
+					t.Fatalf("%s 组供应商图标 %q 不合法: %v", g.MarkerKey, vendor.Icon, err)
+				}
+			}
 		}
 
 		var bindings []model.ModelBinding
@@ -412,8 +440,9 @@ func TestSeedSkipsChannelOnNameConflict(t *testing.T) {
 		t.Fatalf("模型行仍应写入: %v", err)
 	}
 
+	// 只统计"本组模型"的绑定：其它组会正常建绑定，全局计数会误判。
 	var bindings int64
-	if err := gdb.Model(&model.ModelBinding{}).Count(&bindings).Error; err != nil {
+	if err := gdb.Model(&model.ModelBinding{}).Where("model_id = ?", seeds[0].ID).Count(&bindings).Error; err != nil {
 		t.Fatalf("统计绑定失败: %v", err)
 	}
 	if bindings != 0 {
@@ -449,9 +478,8 @@ func TestPresetGroupsAreWellFormed(t *testing.T) {
 			t.Fatalf("%s：BaseURL 不是绝对地址：%q", g.MarkerKey, g.Channel.BaseURL)
 		}
 		for _, m := range g.Models {
-			if modelIDs[m.ID] {
-				t.Fatalf("模型 ID 跨组重复：%s", m.ID)
-			}
+			// 同一模型 ID 允许跨组（全局模型可挂多条渠道）：先写入的组拥有价目，
+			// 后一组只补绑定。这里只要求声明本身完整。
 			modelIDs[m.ID] = true
 			if m.ID == "" || m.DisplayName == "" || m.Modality == "" {
 				t.Fatalf("%s：模型声明不完整：%+v", g.MarkerKey, m)
@@ -459,7 +487,8 @@ func TestPresetGroupsAreWellFormed(t *testing.T) {
 			if len(m.Endpoints) == 0 {
 				t.Fatalf("%s/%s：缺端点声明（文档与路由都靠它）", g.MarkerKey, m.ID)
 			}
-			if len(m.Caps) == 0 {
+			// 纯对话/嵌入模型可以没有额外能力；媒体模型必须有（决定文档 TAB）。
+			if m.Modality != "chat" && m.Modality != "embedding" && len(m.Caps) == 0 {
 				t.Fatalf("%s/%s：缺能力声明（文档侧栏会少 TAB）", g.MarkerKey, m.ID)
 			}
 		}
@@ -477,7 +506,14 @@ func TestPresetGroupsAreWellFormed(t *testing.T) {
 func TestPresetSeedsPriceInvariants(t *testing.T) {
 	for _, g := range presetGroups() {
 		for _, s := range g.Models {
+			mode := s.BillingMode
+			if mode != "" && mode != model.BillingModeSpec {
+				continue // tokens/call 不走规格价目
+			}
 			sp := s.Spec
+			// 现网导出的模型可能没有固定档（调用方必须显式传分辨率）；
+			// 代码里策展的方舟组仍强制要求，避免"照文档不传分辨率就 400"。
+			strictTier := g.MarkerKey == arkPresetMarkerKey
 			switch s.Modality {
 			case "image":
 				if sp.Kind != "per_image" {
@@ -495,18 +531,20 @@ func TestPresetSeedsPriceInvariants(t *testing.T) {
 				if sp.Kind != "per_video" {
 					t.Fatalf("%s/%s：视频模型 kind 应为 per_video，实际 %q", g.MarkerKey, s.ID, sp.Kind)
 				}
-				if sp.ResolutionFixed == "" {
+				if strictTier && sp.ResolutionFixed == "" {
 					t.Fatalf("%s/%s：必须配 resolution_fixed（否则不传分辨率的请求直接 400）", g.MarkerKey, s.ID)
 				}
-				if _, ok := sp.SecondPrice[sp.ResolutionFixed]; !ok {
-					t.Fatalf("%s/%s：固定档 %s 没有秒价（冻结必然失败）", g.MarkerKey, s.ID, sp.ResolutionFixed)
+				if sp.ResolutionFixed != "" {
+					if _, ok := sp.SecondPrice[sp.ResolutionFixed]; !ok {
+						t.Fatalf("%s/%s：固定档 %s 没有秒价（冻结必然失败）", g.MarkerKey, s.ID, sp.ResolutionFixed)
+					}
 				}
 				if sp.MaxSeconds == nil || *sp.MaxSeconds < 1 {
 					t.Fatalf("%s/%s：必须配 max_seconds（冻结与结算上限的唯一依据）", g.MarkerKey, s.ID)
 				}
 				// 指针非 nil = 「显式声明过」，比"必须为 true"更本质：
 				// 上游不认 -1 的模型必须显式写 false，否则没人知道这是漏配还是有意为之。
-				if sp.AllowAutoDuration == nil {
+				if strictTier && sp.AllowAutoDuration == nil {
 					t.Fatalf("%s/%s：必须显式声明 allow_auto_duration", g.MarkerKey, s.ID)
 				}
 			}

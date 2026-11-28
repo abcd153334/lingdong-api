@@ -131,8 +131,8 @@ services:
       # 入口在另一台机器时，把那台机器的地址也加进 .env 的 LD_TRUSTED_PROXIES。
       LD_TRUSTED_PROXIES: "${LD_TRUSTED_PROXIES:-172.29.0.0/24,127.0.0.1/32}"
       STORAGE_DIR: "${STORAGE_DIR:-/app/data}"
-      # 演示数据默认不写；想在本机看演示数据时在 .env 里改成 1。
-      LD_SEED_ENABLED: "${LD_SEED_ENABLED:-0}"
+      # 内置出厂预设（默认写入，全部停用 + 空密钥）。置 0 表示不要任何出厂内容。
+      LD_BUILTIN_PRESETS: "${LD_BUILTIN_PRESETS:-1}"
     # 整套系统**唯一**的宿主端口。
     # 换端口只改 .env 的 APP_PORT，不要改这一行 —— 脚本、体检、文档读同一个变量。
     #

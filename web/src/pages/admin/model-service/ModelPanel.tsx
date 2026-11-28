@@ -1,4 +1,4 @@
-import { useMemo, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import type { ColumnDef, SortingState } from "@tanstack/react-table";
 import { toast } from "sonner";
 
@@ -13,7 +13,6 @@ import { EntitySelect } from "@/components/common/EntitySelect";
 import { Field } from "@/components/common/Field";
 import { FilterBar, type FilterField } from "@/components/common/FilterBar";
 import { Icon } from "@/components/common/Icon";
-import { Pagination } from "@/components/common/Pagination";
 import { Tag } from "@/components/common/StatusTag";
 import {
   useAdminModelsQuery,
@@ -27,11 +26,9 @@ import { actionsCol } from "@/lib/table";
 import type { AdminModelItem, ChannelItem, TagColorOption } from "@/types";
 
 import { BindDialog } from "./BindDialog";
-import { ChannelOverview } from "./ChannelOverview";
 import { ModelDialog } from "./ModelDialog";
 import { priceSummary } from "./modelForm";
-import { SyncDialog } from "./SyncDialog";
-import { channelStatusLabel, type AdapterGroup } from "./grouping";
+import { channelStatusLabel } from "./grouping";
 
 const EMPTY_FILTERS = { fKw: "", fEnabled: "", fVendor: "" };
 
@@ -78,29 +75,32 @@ function MainBar({
 /**
  * 右栏：选中渠道下的模型列表 + 该渠道的操作台。
  *
- * 三条语义必须写在界面上（否则运营会按错误的心智模型操作）：
+ * 四条语义必须写在界面上（否则运营会按错误的心智模型操作）：
  *  1. 模型与价格是**全局**的，一个模型可挂多条渠道；这里改的只是本渠道的绑定；
  *  2. 解绑 ≠ 删除模型 —— 文案必须点明"其他渠道不受影响"；
- *  3. 渠道的启停/测试/删除只能从**渠道条**做（左栏是导航，不是操作面板）。
+ *  3. 渠道的启停/测试/删除只能从**渠道条**做（左栏是导航，不是操作面板）；
+ *  4. **新建模型只在渠道内**：模型必须在一个事务里带着 `initial_binding` 落库。
+ *     全部模型视图没有渠道上下文，在那里新建等于生产一个绑不上、也没人能用上的孤儿模型。
  */
 export function ModelPanel({
   channel,
-  group,
+  channelPending,
   onEditChannel,
   onChannelDeleted,
-  onSelectChannel,
-  onCreateChannel,
   onOpenRail,
 }: {
   channel: ChannelItem | null;
-  /** 未选中渠道时要展示的适配器（`?a` 指向的那个）；null = 根提示态 */
-  group: AdapterGroup | null;
+  /**
+   * `?c` 已写但渠道列表还没回来（深链 / 刚刷新）。
+   *
+   * 这一位存在是为了**避免打两次请求**：此时 `channel` 还是 null，若直接按
+   * “无 channel_id” 发一次，拿到的会是全量模型，等列表回来后立刻再发一次带
+   * channel_id 的 —— 首屏闪一下全站数据，还多一次慢查询。
+   */
+  channelPending: boolean;
   onEditChannel: (ch: ChannelItem) => void;
-  /** 渠道被删除：带上它的适配器 id，页面据此清 `c`、保留 `a` */
+  /** 渠道被删除：页面清 `c` 回到全部模型 */
   onChannelDeleted: (adapterId: string) => void;
-  /** 总览里点一行 → 选中该渠道 */
-  onSelectChannel: (ch: ChannelItem) => void;
-  onCreateChannel: (adapterId: string) => void;
   /** ≤899 打开左栏抽屉（按钮在桌面被 CSS 隐藏） */
   onOpenRail: () => void;
 }) {
@@ -120,7 +120,6 @@ export function ModelPanel({
     model: null,
   });
   const [vendorOpen, setVendorOpen] = useState(false);
-  const [syncOpen, setSyncOpen] = useState(false);
   /** 停用确认（停用要填原因，入审计） */
   const [statusTarget, setStatusTarget] = useState<{ ch: ChannelItem; next: number } | null>(null);
   const [statusReason, setStatusReason] = useState("");
@@ -141,13 +140,26 @@ export function ModelPanel({
     [filters, page, sorting, channel?.id],
   );
 
-  // 没有渠道就不发请求：params 里 channel_id 为 undefined 时后端会回**全量模型**，
-  // 而总览视图根本不渲染这张表。
-  const q = useAdminModelsQuery(params, !!channel);
+  // 两态都发请求：无 channel_id = 跨渠道全量（后端原生支持）。
+  // 唯一要挡住的是 `?c` 尚未解析完的那一帧（见 channelPending 的注释）。
+  const q = useAdminModelsQuery(params, !channelPending);
   const rows = q.data?.items ?? [];
   const total = q.data?.total ?? 0;
-  // 总览标题里的「N 条停用」从已全量下发的渠道行数出来，不额外请求。
-  const stoppedCount = group?.channels.filter((c) => c.status !== 1).length ?? 0;
+
+  /**
+   * 切渠道 → 回到第 1 页。
+   *
+   * 没有这一行就是**数据错**（不是样式问题）：在全部模型翻到第 5 页，再点进一条
+   * 只有 2 个模型的渠道，请求带 page=5 → 空表 + 「这个渠道还没有模型」，
+   * 而用户看到的是"明明刚才还列着"。
+   *
+   * 价格告警一起清：它说的是"上一次保存"，切走之后还挂在列表上方，
+   * 会让人以为当前渠道刚保存过（保存成功的告警本来就只在保存现场有意义）。
+   */
+  useEffect(() => {
+    setPage(1);
+    setWarnings([]);
+  }, [channel?.id]);
   // 供应商列表随 /admin/models 一起下发，**不再单独请求 /admin/vendors**：
   // 那是同一份数据，两个请求只会在改分组后短暂显示不一致。
   const vendors = q.data?.vendors ?? [];
@@ -223,6 +235,45 @@ export function ModelPanel({
     });
   };
 
+  /**
+   * 模型级启停（**全局**：所有渠道一起生效）。
+   *
+   * 停用要在渠道视图里二次确认：这里的上下文是"某条渠道"，而这条动作关的是整个模型 ——
+   * 不点明就会变成"我只想让它别走这条线路"，实际把其他渠道也一起下线了。
+   * 只想关本渠道有另一条动作：行内「绑定设置」→「启用这条绑定」。
+   * 启用没有这种歧义，不拦。
+   */
+  const requestToggle = useCallback(
+    async (m: AdminModelItem) => {
+      if (channel && m.enabled) {
+        const ok = await confirmDialog({
+          title: "停用模型（全部渠道）",
+          body: (
+            <div>
+              <p>
+                停用后 <b>{m.id}</b> 在<b>所有渠道</b>上立即停止服务，不只是「{channel.name}」。
+              </p>
+              <p className="muted small">
+                只想让本渠道不再使用它，请用行内的「绑定设置」取消「启用这条绑定」。
+              </p>
+            </div>
+          ),
+          okText: "全部渠道停用",
+          okVariant: "danger",
+        });
+        if (!ok) return;
+      }
+      toggleModel.mutate(
+        { id: m.id, enabled: !m.enabled },
+        {
+          onSuccess: (data) => toast(data?.enabled ? `已启用 ${m.id}` : `已禁用 ${m.id}`),
+          onError: (e) => toast.error(e instanceof ApiError ? e.message : "操作失败"),
+        },
+      );
+    },
+    [channel, toggleModel],
+  );
+
   const columns = useMemo<ColumnDef<AdminModelItem, unknown>[]>(() => {
     const base: ColumnDef<AdminModelItem, unknown>[] = [
       {
@@ -236,6 +287,13 @@ export function ModelPanel({
             name={row.original.display_name || row.original.id}
           >
             <span className="mono small muted">{row.original.id}</span>
+            {/* 出厂标记：告诉运营这个模型来自内置预设（会被「恢复出厂」覆盖），
+                不是自己建的。只在有标记时出现，不占固定列宽。 */}
+            {row.original.preset_group ? (
+              <Tag tone="gray" title={`出厂组：${row.original.preset_group}`}>
+                内置
+              </Tag>
+            ) : null}
           </EntityCell>
         ),
       },
@@ -243,7 +301,10 @@ export function ModelPanel({
         id: "vendor",
         accessorKey: "vendor_name",
         enableSorting: true,
-        meta: { label: "供应商" },
+        // 900px 下左栏 200 + 6 列会横向溢出：按"越靠上下文越可省"降级，
+        // 先收供应商（priority 2），再收计费（priority 3）。状态与可路由渠道必须留着 ——
+        // 这一页要回答的就是"这个模型挂在哪、能不能用"。
+        meta: { label: "供应商", priority: 2 },
         cell: ({ row }) => (
           <span className="small">{row.original.vendor_name || row.original.vendor}</span>
         ),
@@ -252,7 +313,7 @@ export function ModelPanel({
         id: "billing_mode",
         accessorKey: "billing_mode",
         enableSorting: true,
-        meta: { label: "计费" },
+        meta: { label: "计费", priority: 3 },
         cell: ({ row }) => (
           <span className="small">
             {priceSummary(row.original)}
@@ -261,7 +322,9 @@ export function ModelPanel({
         ),
       },
     ];
-    // 「本渠道」这一列只在选中渠道时存在：没有渠道上下文时它没有意义。
+    // 两态的第四列不同源：
+    //  - 有渠道 → 「本渠道」读 binding（该渠道上的上游名/权重/启停）；
+    //  - 无渠道 → 「绑定渠道」读 bindings（计数），因为全量查询不下发逐条绑定。
     if (channel) {
       base.push({
         id: "binding",
@@ -279,6 +342,27 @@ export function ModelPanel({
           );
         },
       });
+    } else {
+      /**
+       * 列名必须说「可路由」而不是「绑定」。
+       *
+       * 全量查询下发的 `bindings` 是**可路由**的绑定数（启用绑定 ∩ 启用渠道），
+       * 不是绑定总条数：一个模型挂在一条停用渠道上时它会是 0。叫「绑定渠道」再显示
+       * 「未绑定」就是在说反话 —— 运营会据此认为模型是孤儿（去删，被 409；
+       * 去重建，被 409），而它其实只是这条线路当前不可用。
+       */
+      base.push({
+        id: "bindings",
+        accessorKey: "bindings",
+        enableSorting: false,
+        meta: { label: "可路由渠道" },
+        cell: ({ row }) =>
+          row.original.bindings > 0 ? (
+            <span className="small">{row.original.bindings} 条渠道</span>
+          ) : (
+            <Tag tone="gray">无可用</Tag>
+          ),
+      });
     }
     base.push({
       id: "enabled",
@@ -292,35 +376,34 @@ export function ModelPanel({
       actionsCol<AdminModelItem>(
         (m) => {
           const bound = Boolean(m.binding);
+          /** 绑定相关动作必须有渠道上下文：`BindDialog` 在 channel=null 时 save() 直接 return，
+           *  留在全部模型里就是"点了没反应也不报错"的死入口。 */
+          const bindActs = channel
+            ? [
+                {
+                  icon: "link" as const,
+                  // 未绑定时说清楚"点了会发生什么"：这一步是**新建**绑定，
+                  // 而"绑定设置"读起来像在改一个已存在的配置。
+                  label: bound ? "绑定设置" : "绑定到本渠道",
+                  onClick: () => setBindOpen({ open: true, model: m }),
+                },
+                {
+                  icon: "close" as const,
+                  label: "解除绑定",
+                  tone: "danger" as const,
+                  // 只有已绑定的行才显示「解除绑定」：对未绑定的行显示等于给一个必然 404 的入口。
+                  hidden: !bound,
+                  onClick: () => setBindOpen({ open: true, model: m }),
+                },
+              ]
+            : [];
           return [
             { icon: "edit", label: "编辑模型", onClick: () => setDialog({ open: true, model: m }) },
-            {
-              icon: "link",
-              // 未绑定时说清楚"点了会发生什么"：这一步是**新建**绑定，
-              // 而"绑定设置"读起来像在改一个已存在的配置。
-              label: bound ? "绑定设置" : "绑定到本渠道",
-              onClick: () => setBindOpen({ open: true, model: m }),
-            },
-            {
-              icon: "close",
-              label: "解除绑定",
-              tone: "danger",
-              // 只有已绑定的行才显示「解除绑定」：对未绑定的行显示等于给一个必然 404 的入口。
-              hidden: !bound,
-              onClick: () => setBindOpen({ open: true, model: m }),
-            },
+            ...bindActs,
             {
               icon: "power",
               label: m.enabled ? "停用模型" : "启用模型",
-              onClick: () =>
-                toggleModel.mutate(
-                  { id: m.id, enabled: !m.enabled },
-                  {
-                    onSuccess: (data) =>
-                      toast(data?.enabled ? `已启用 ${m.id}` : `已禁用 ${m.id}`),
-                    onError: (e) => toast.error(e instanceof ApiError ? e.message : "操作失败"),
-                  },
-                ),
+              onClick: () => void requestToggle(m),
             },
           ];
         },
@@ -329,7 +412,7 @@ export function ModelPanel({
       ),
     );
     return base;
-  }, [channel, toggleModel]);
+  }, [channel, requestToggle]);
 
   const filterFields: FilterField[] = [
     { t: "search", id: "fKw", label: "关键词", placeholder: "搜索模型 ID / 名称" },
@@ -367,11 +450,26 @@ export function ModelPanel({
         />
       ),
     },
-    { t: "btn", id: "btnNewModel", label: "新建模型", variant: "primary", icon: "plus" },
-    { t: "btn", id: "btnBind", label: "绑定已有模型", icon: "link" },
-    { t: "btn", id: "btnVendors", label: "供应商", icon: "grid" },
-    { t: "btn", id: "btnSync", label: "上游同步", icon: "refresh" },
   ];
+  /**
+   * 「新建模型 / 绑定已有模型」**只在渠道态出现**，理由同一条：
+   *
+   *  - 新建：模型必须在同一事务里带 `initial_binding` 落库。全部模型视图没有
+   *    "绑到哪"这个主语，建出来就是一个谁也用不上的孤儿（还删不掉 —— 想删它得先绑，
+   *    想绑它得先进渠道，而建它的时候偏偏没有渠道）；
+   *  - 绑定：`BindDialog` 在 channel=null 时 save() 直接 return，留着就是个
+   *    点了没反应也不报错的死入口。
+   *
+   * 两者必须相邻：都是"往本渠道加模型"的动线。供应商不是 —— 它排在最后。
+   */
+  if (channel) {
+    filterFields.push({ t: "btn", id: "btnNewModel", label: "新建模型", variant: "primary", icon: "plus" });
+    filterFields.push({ t: "btn", id: "btnBind", label: "绑定已有模型", icon: "link" });
+  }
+  filterFields.push({ t: "btn", id: "btnVendors", label: "供应商", icon: "grid" });
+
+  /** 空表有两种含义：筛选没命中 / 一个模型都没有 —— 引导完全不同，不能共用一句文案。 */
+  const hasFilter = Boolean(filters.fKw.trim() || filters.fEnabled || filters.fVendor);
 
   return (
     <section className="ms-main" aria-label="模型列表">
@@ -380,28 +478,44 @@ export function ModelPanel({
         leading={
           channel ? (
             <EntityIcon size="sm" url={channel.icon_url} name={channel.name} />
-          ) : group ? (
-            <EntityIcon size="sm" url={group.iconUrl} name={group.label} />
           ) : (
-            <Icon name="grid" size={15} />
+            <Icon name="grid" size={16} />
           )
         }
-        title={channel ? channel.name : group ? group.label : "模型服务"}
+        title={channel ? channel.name : "全部模型"}
         meta={
           channel ? (
             <>
               <span className="mono small muted">{channel.base_url}</span>
+              {channel.website_url ? (
+                // 渠道条是"快速跳转"的落点：编辑抽屉要三步才打开，而这里地址就在眼前。
+                <a
+                  className="ms-chanbar__site"
+                  href={channel.website_url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  aria-label="打开上游官网"
+                  title={`上游官网：${channel.website_url}`}
+                >
+                  <Icon name="external" size={13} />
+                </a>
+              ) : null}
               {channel.status === 1 ? null : (
                 <Tag tone="warning">{channelStatusLabel(channel.status)}</Tag>
               )}
+              {/* 内置标记：让运营知道「这条会被恢复出厂覆盖」，以及它来自出厂而不是自己建的。
+                  只是个说明徽标，不是编辑开关 —— 内置渠道照样能改名改价。 */}
+              {channel.preset_group ? (
+                <Tag tone="gray" title={`出厂组：${channel.preset_group}`}>
+                  内置
+                </Tag>
+              ) : null}
             </>
-          ) : group ? (
-            <span className="small muted">
-              {group.channels.length} 条渠道
-              {stoppedCount > 0 ? `（${stoppedCount} 条停用）` : ""}
-            </span>
           ) : (
-            <span className="small muted">从左侧选一个适配器</span>
+            // 全量视图的唯一元信息就是条数：没有渠道就没有地址/状态可说
+            <span className="small muted">
+              {q.isLoading ? "加载中…" : `共 ${total} 个模型`}
+            </span>
           )
         }
         actions={
@@ -433,97 +547,91 @@ export function ModelPanel({
                 删除渠道
               </button>
             </>
-          ) : group ? (
-            <button
-              type="button"
-              className="btn btn-sm"
-              onClick={() => onCreateChannel(group.id)}
-            >
-              新建渠道
-            </button>
-          ) : null
+          ) : undefined
         }
       />
 
-      {/* 模型域的工具条与价格告警只在渠道视图里出现：
-          搜索/筛选过滤的是模型，没有渠道上下文时它们"按了没反应"。 */}
-      {channel ? (
-        <>
-          <div className="ms-main__tools">
-            <FilterBar
-              fields={filterFields}
-              value={filters}
-              onChange={(id, value) => {
-                setFilters((f) => ({ ...f, [id]: value }));
-                setPage(1);
-              }}
-              onReset={() => {
-                setFilters(EMPTY_FILTERS);
-                setPage(1);
-              }}
-              onAction={(id) => {
-                if (id === "btnNewModel") setDialog({ open: true, model: null });
-                else if (id === "btnBind") setBindOpen({ open: true, model: null });
-                else if (id === "btnVendors") setVendorOpen(true);
-                else if (id === "btnSync") setSyncOpen(true);
-              }}
-            />
-          </div>
+      <div className="ms-main__tools">
+        <FilterBar
+          fields={filterFields}
+          value={filters}
+          onChange={(id, value) => {
+            setFilters((f) => ({ ...f, [id]: value }));
+            setPage(1);
+          }}
+          onReset={() => {
+            setFilters(EMPTY_FILTERS);
+            setPage(1);
+          }}
+          onAction={(id) => {
+            if (id === "btnNewModel") setDialog({ open: true, model: null });
+            else if (id === "btnBind") setBindOpen({ open: true, model: null });
+            else if (id === "btnVendors") setVendorOpen(true);
+          }}
+        />
+      </div>
 
-          {warnings.length > 0 ? (
-            <div className="alert-banner warn" role="status">
-              <span>
-                <b>已保存，但有 {warnings.length} 条价格提醒</b>
-                <ul>
-                  {warnings.map((w) => (
-                    <li key={w}>{w}</li>
-                  ))}
-                </ul>
-              </span>
-              <button type="button" className="btn btn-sm right" onClick={() => setWarnings([])}>
-                知道了
-              </button>
-            </div>
-          ) : null}
-        </>
+      {warnings.length > 0 ? (
+        <div className="alert-banner warn" role="status">
+          <span>
+            <b>已保存，但有 {warnings.length} 条价格提醒</b>
+            <ul>
+              {warnings.map((w) => (
+                <li key={w}>{w}</li>
+              ))}
+            </ul>
+          </span>
+          <button type="button" className="btn btn-sm right" onClick={() => setWarnings([])}>
+            知道了
+          </button>
+        </div>
       ) : null}
 
       <div className="ms-main__body">
-        {channel ? (
-          <>
-            <DataTable
-              label="渠道模型"
-              columns={columns}
-              data={rows}
-              total={total}
-              page={page}
-              pageSize={DEFAULT_PAGE_SIZE}
-              onPageChange={setPage}
-              sort={sorting}
-              onSortChange={setSorting}
-              loading={q.isLoading}
-              error={q.isError ? "模型列表加载失败" : undefined}
-              empty={
+        <DataTable
+          label={channel ? "渠道模型" : "全部模型"}
+          columns={columns}
+          data={rows}
+          total={total}
+          page={page}
+          pageSize={DEFAULT_PAGE_SIZE}
+          onPageChange={setPage}
+          sort={sorting}
+          onSortChange={setSorting}
+          loading={q.isLoading || channelPending}
+          error={q.isError ? "模型列表加载失败" : undefined}
+          empty={
+            channel ? (
+              /**
+               * 渠道视图也要分两种情况：筛选没命中和真的没有模型。
+               * 只说「这个渠道还没有模型」会让运营去建一个**已经存在**的模型（409），
+               * 而实际原因只是关键词还留着上一条渠道的搜索词。
+               */
+              hasFilter ? (
+                <EmptyState title="没有符合条件的模型" desc="换个关键词，或清空筛选再试。" />
+              ) : (
                 <EmptyState
                   title="这个渠道还没有模型"
                   desc="点「新建模型」建一个并自动绑到本渠道，或用「绑定已有模型」把现有模型挂上来。"
                 />
-              }
-            />
-            <Pagination total={total} page={page} pageSize={DEFAULT_PAGE_SIZE} onPageChange={setPage} />
-          </>
-        ) : group ? (
-          <ChannelOverview
-            group={group}
-            onSelect={onSelectChannel}
-            onCreateChannel={onCreateChannel}
-          />
-        ) : (
-          <EmptyState
-            title="选择左侧的渠道"
-            desc="模型挂在渠道上；先选一条渠道，再管理它的模型。"
-          />
-        )}
+              )
+            ) : (
+              /**
+               * 全部模型视图没有"新建"入口（见 filterFields 的注释），所以空表不能只说
+               * "换个关键词" —— 一个模型都没有时，得把**唯一**的正确动线写出来，
+               * 否则运营在这一页找不到任何能点的东西。
+               */
+              <EmptyState
+                title={hasFilter ? "没有符合条件的模型" : "还没有任何模型"}
+                desc={
+                  hasFilter
+                    ? "换个关键词，或清空筛选再试。"
+                    : "模型必须挂在渠道上提供：请在左侧选择一个适配器 → 渠道，在渠道内「新建模型」（建完即绑定），已有模型可用「绑定已有模型」挂上去。"
+                }
+              />
+            )
+          }
+        />
       </div>
 
       {/* 弹窗常驻（不随 open 卸载）：价格告警、草稿与开合动画都依赖节点保留。 */}
@@ -547,7 +655,6 @@ export function ModelPanel({
       />
 
       <VendorManagerDialog open={vendorOpen} onClose={() => setVendorOpen(false)} />
-      <SyncDialog open={syncOpen} onClose={() => setSyncOpen(false)} />
 
       <Dialog
         open={statusTarget !== null}

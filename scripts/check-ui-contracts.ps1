@@ -170,8 +170,9 @@ $m10 = Find-Violations -Pattern '(orderColumns|usageColumns)\s*[:=]'
 Add-Check -Id 'M10' -Name '页面层重复定义订单/调用列（应只在 lib/table.ts）' -Actual $m10.Count -Expect 0 -Samples $m10
 
 # ---------- M15 原型页级语义类：已移植 + 被引用 ----------
-# 2026-11-11：'adapter-grid' / 'adapter-card' 随「适配器页」合并进模型服务而删除
-# （左栏是级联列表，不再有卡片网格）。名单里删掉，样式表里的死规则也一并删掉 ——
+# 2026-11-11：'adapter-grid' / 'adapter-card' 随「适配器页」合并进模型服务而删除。
+# 2026-11-26：左栏改成适配器卡片（`.ms-adp`，页内自有类），仍不进这份原型类白名单 ——
+# 白名单只装"原型页移植过来的语义类"，`.ms-*` 是本页私有命名空间。
 # 留着"门禁要求存在但页面不用"的类，等于把门禁变成摆设。
 $Transplant = @(
   'up-zone', 'qbar', 'uc-hero', 'code-row',
@@ -258,7 +259,10 @@ $TipBaseline = @{
   # 2026-11-03 由 26 → 27：+1「可用联系方式渠道」。该字段是**策略白名单**，
   # 只有同时配好发送服务（SMTP / 短信商）的渠道才会展示给终端用户；不解释就会被
   # 当成「勾了却看不到」的 bug —— 同样是「不解释必误解」，非文案膨胀。
-  'pages/admin/Config.tsx'                       = 27
+  # 2026-11-28 由 27 → 28：登记校正，不是放宽。实测值在首个提交（2d57353）时
+  # 就已是 28，基线漏登了一处，导致这条门禁自建立起一直红着 —— 红灯常亮就等于
+  # 没有信号。本次仅把基线对齐到既有实测，未新增任何提示；后续仍只允许降。
+  'pages/admin/Config.tsx'                       = 28
   'pages/portal/Keys.tsx'                        = 6
   'components/admin/PayChannelCreateDialog.tsx'  = 4
   # 2026-11-09 移除 `pages/portal/Settings.tsx` = 3：用户中心改为账户设置弹窗的落地页

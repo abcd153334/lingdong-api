@@ -25,8 +25,28 @@ export interface AnchoredLayerOpts {
   open: boolean;
   anchorRef: RefObject<HTMLElement | null>;
   popRef: RefObject<HTMLElement | null>;
-  /** 优先出现在锚点哪一侧（默认 below） */
-  prefer?: "above" | "below";
+  /**
+   * 优先出现在锚点哪一侧（默认 below）。
+   *
+   * `right` 是给"二级导航"用的：面板左缘贴住锚点右缘、纵向对齐 `alignRef`。
+   * 它**不参与上下翻转**（见 place 里的注释）——把贴边的面板翻到左边会直接压住
+   * 导航栏本体，比溢出更糟。
+   */
+  prefer?: "above" | "below" | "right";
+  /**
+   * `prefer="right"` 时的纵向基准：缺省用 `anchorRef`。
+   *
+   * 为什么需要两个 ref：水平锚必须是**整栏**（卡片右缘比栏右缘内缩 10px，
+   * 拿卡片当水平锚会让面板压进栏里），而纵向必须对齐**被点的那张卡**。
+   */
+  alignRef?: RefObject<HTMLElement | null>;
+  /**
+   * 重算触发器：值变了就重新定位，即使 `open` 没变。
+   *
+   * 没有它，「从 A 卡切到 B 卡」时 `open` 恒为 true，effect 不会重跑，
+   * 面板会停在 A 的坐标上 —— 内容已经换成 B，位置还是 A，是必现的错位。
+   */
+  repositionKey?: unknown;
   /** 与锚点的间距（Tip 用 8，下拉用 6） */
   gap?: number;
   /** 与视口边缘的最小间距 */
@@ -42,14 +62,16 @@ export interface AnchoredLayerOpts {
 /** 定位结果：样式 + 箭头需要的两项几何事实。 */
 export interface AnchoredLayer {
   style: CSSProperties;
-  /** 面板最终落在锚点的哪一侧（决定尖角画在上沿还是下沿） */
-  placement: "above" | "below";
+  /** 面板最终落在锚点的哪一侧（决定尖角画在哪条边） */
+  placement: "above" | "below" | "right";
   /** 尖角中心相对面板左缘的偏移（已夹取，单位 px） */
   arrowX: number;
+  /** 尖角中心相对面板上缘的偏移（`right` 用；其余情况为 0） */
+  arrowY: number;
 }
 
 const HIDDEN: CSSProperties = { left: 0, top: 0, visibility: "hidden" };
-const HIDDEN_BOX: AnchoredLayer = { style: HIDDEN, placement: "below", arrowX: 24 };
+const HIDDEN_BOX: AnchoredLayer = { style: HIDDEN, placement: "below", arrowX: 24, arrowY: 0 };
 
 /** 压缩后的最小可用高度：再小就没有可读内容了，不如让它溢出。 */
 const MIN_HEIGHT = 96;
@@ -66,7 +88,8 @@ function sameBox(a: AnchoredLayer, b: AnchoredLayer): boolean {
     a.style.maxHeight === b.style.maxHeight &&
     a.style.visibility === b.style.visibility &&
     a.placement === b.placement &&
-    a.arrowX === b.arrowX
+    a.arrowX === b.arrowX &&
+    a.arrowY === b.arrowY
   );
 }
 
@@ -76,6 +99,8 @@ export function useAnchoredLayerBox(opts: AnchoredLayerOpts): AnchoredLayer {
     anchorRef,
     popRef,
     prefer = "below",
+    alignRef,
+    repositionKey,
     gap = 6,
     edge = 8,
     offsetX = 0,
@@ -103,6 +128,29 @@ export function useAnchoredLayerBox(opts: AnchoredLayerOpts): AnchoredLayer {
     const vh = document.documentElement.clientHeight || window.innerHeight;
     const w = matchWidth ? r.width : pop.offsetWidth;
     const h = pop.offsetHeight;
+
+    /**
+     * `right`：贴在锚点右缘（gap=0 时严丝合缝）、纵向对齐 `alignRef` 的顶边。
+     *
+     * 不做左右翻转：这一支服务的是"导航栏 → 二级面板"，翻到左边会盖住导航本身。
+     * 右溢时只夹进视口（面板变窄），宁可遮一点内容，也不能跑到栏里。
+     */
+    if (prefer === "right") {
+      const ar = (alignRef?.current ?? anchor).getBoundingClientRect();
+      const left = Math.min(r.right + gap, Math.max(edge, vw - edge - w));
+      // 顶边对齐被点的那张卡；放不下时整体上推（不低于 edge）
+      const top = Math.min(Math.max(ar.top, edge), Math.max(edge, vh - edge - h));
+      const wantY = ar.top + ar.height / 2 - top;
+      const arrowY = Math.min(Math.max(wantY, ARROW_INSET), Math.max(ARROW_INSET, h - ARROW_INSET));
+      const next: CSSProperties = { left, top, visibility: "visible" };
+      if (matchWidth) next.width = w;
+      if (maxHeight !== undefined) {
+        next.maxHeight = Math.max(MIN_HEIGHT, Math.min(maxHeight, vh - edge * 2));
+      }
+      const box: AnchoredLayer = { style: next, placement: "right", arrowX: 0, arrowY };
+      setBox((prev) => (sameBox(prev, box) ? prev : box));
+      return;
+    }
 
     // 水平：先对齐锚点左缘，右溢改成右对齐，最后夹进视口
     let left = r.left + offsetX;
@@ -149,9 +197,10 @@ export function useAnchoredLayerBox(opts: AnchoredLayerOpts): AnchoredLayer {
       // 判据只看最终落点：压缩到上方时 top 必然小于锚点底边
       placement: top >= r.bottom ? "below" : "above",
       arrowX,
+      arrowY: 0,
     };
     setBox((prev) => (sameBox(prev, result) ? prev : result));
-  }, [anchorRef, popRef, prefer, gap, edge, offsetX, maxHeight, matchWidth]);
+  }, [anchorRef, popRef, prefer, alignRef, gap, edge, offsetX, maxHeight, matchWidth]);
 
   useLayoutEffect(() => {
     if (!open) {
@@ -183,7 +232,7 @@ export function useAnchoredLayerBox(opts: AnchoredLayerOpts): AnchoredLayer {
       vv?.removeEventListener("scroll", onMove);
       ro?.disconnect();
     };
-  }, [open, place, popRef]);
+  }, [open, place, popRef, repositionKey]);
 
   return box;
 }

@@ -63,27 +63,3 @@ func TestEnvDefaultsForB7(t *testing.T) {
 		t.Fatalf("剩余空间下限默认应为 5GB，实际 %d", env.CapacityWarnMinFreeGB)
 	}
 }
-
-// TestSeedEnabledDefaultsOn 校验 LD_SEED_ENABLED 默认开启（与历史行为一致）。
-//
-// 这个默认值必须是 true：默认关闭会让**新装库一个模型、一条渠道都没有**，
-// 门户与模型广场直接空白。它只在「真实接入、要清空重建」时由运维显式置 0。
-func TestSeedEnabledDefaultsOn(t *testing.T) {
-	t.Setenv("LD_SEED_ENABLED", "")
-	if env := Load(); !env.SeedEnabled {
-		t.Fatal("LD_SEED_ENABLED 默认应为开启")
-	}
-
-	for _, raw := range []string{"0", "false", "off", "no"} {
-		t.Setenv("LD_SEED_ENABLED", raw)
-		if env := Load(); env.SeedEnabled {
-			t.Fatalf("LD_SEED_ENABLED=%q 应解析为关闭", raw)
-		}
-	}
-	for _, raw := range []string{"1", "true", "on", "yes"} {
-		t.Setenv("LD_SEED_ENABLED", raw)
-		if env := Load(); !env.SeedEnabled {
-			t.Fatalf("LD_SEED_ENABLED=%q 应解析为开启", raw)
-		}
-	}
-}

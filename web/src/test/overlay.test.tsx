@@ -83,6 +83,34 @@ describe("Dialog / Sheet", () => {
     expect(onOk).toHaveBeenCalled();
   });
 
+  it("footerStart 渲染在 actions 之前，不传时页脚结构逐字不变", () => {
+    const plain = render(
+      <Dialog open onClose={() => {}} title="无入口" actions={[{ label: "取消" }]}>
+        内容体
+      </Dialog>,
+    );
+    expect(plain.container.querySelector(".dl-foot__start")).toBeNull();
+    expect(plain.container.querySelector(".dl-foot--split")).toBeNull();
+    plain.unmount();
+
+    const withStart = render(
+      <Dialog
+        open
+        onClose={() => {}}
+        title="带入口"
+        footerStart={<button type="button">参考价</button>}
+        actions={[{ label: "取消" }]}
+      >
+        内容体
+      </Dialog>,
+    );
+    const foot = withStart.container.querySelector(".dl-foot") as HTMLElement;
+    expect(foot).toHaveClass("dl-foot--split");
+    // 左侧入口必须在动作之前：顺序决定键盘 Tab 与视觉分组
+    expect(Array.from(foot.children).map((el) => el.className)).toEqual(["dl-foot__start", "btn"]);
+    expect(screen.getByRole("button", { name: "参考价" })).toBeInTheDocument();
+  });
+
   it("Esc 关闭，Tab 焦点在弹窗内闭合", () => {
     const onClose = vi.fn();
     const { container } = render(

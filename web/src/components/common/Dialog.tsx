@@ -39,6 +39,14 @@ export interface DialogProps {
   children: ReactNode;
   /** 页脚自定义节点（复杂页脚：含合计/多动作说明等；标准按钮对请用 actions） */
   footer?: ReactNode;
+  /**
+   * 页脚左侧附加动作（只有 `actions` 存在时才渲染，`footer` 的优先级不变）。
+   *
+   * 用途：把「入口类」辅助动作（如模型表单的「上游参考价」）与右侧的保存类动作分组。
+   * 为什么不做成通用插槽：`actions` 已经把按钮渲染收敛到一处，这里再开一个只放一个
+   * 节点的窄口子即可；放开成任意节点会让页脚版式重新散到各调用方。
+   */
+  footerStart?: ReactNode;
   /** 页脚动作（按数组顺序右对齐渲染） */
   actions?: DialogAction[];
   /** md（默认 440px）/ lg（500px）/ wide（560px）/ xl（760px，主从两栏用） */
@@ -77,6 +85,7 @@ export function Dialog({
   headExtra,
   children,
   footer,
+  footerStart,
   actions,
   size = "md",
   className,
@@ -89,6 +98,7 @@ export function Dialog({
 
   const foot = actions?.length ? (
     <>
+      {footerStart ? <div className="dl-foot__start">{footerStart}</div> : null}
       {actions.map((a) => (
         <button
           key={a.label}
@@ -143,7 +153,9 @@ export function Dialog({
           </div>
         ) : null}
         <div className="dl-body">{children}</div>
-        {foot ? <div className="dl-foot">{foot}</div> : null}
+        {foot ? (
+          <div className={cn("dl-foot", actions?.length && footerStart && "dl-foot--split")}>{foot}</div>
+        ) : null}
       </div>
     </>
   );

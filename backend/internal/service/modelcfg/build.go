@@ -390,8 +390,14 @@ func decodeStrings(raw model.JSON) []string {
 	return out
 }
 
-// updateSkipColumns 是不参与「全列写」的列：主键、时间戳、软删、乐观锁版本号。
-const updateSkipColumnsX = "id,version,created_at,updated_at,deleted_at"
+// updateSkipColumns 是不参与「全列写」的列：主键、时间戳、软删、乐观锁版本号，
+// 以及 **内置标记 preset_group**。
+//
+// preset_group 为什么必须排除：它的所有者是 presets 层（新建 / 认领 / 恢复出厂时
+// 用显式 UPDATE 写），modelcfg.Input 里根本没有这个字段。留在全列写里，
+// Build 出来的零值会把标记一并清空 —— 症状是运营在管理台改一次价，内置标记就没了，
+// 「恢复出厂」从此找不到对象，而且没有任何报错。
+const updateSkipColumnsX = "id,version,created_at,updated_at,deleted_at,preset_group"
 
 var updateSkip = func() map[string]bool {
 	out := map[string]bool{}

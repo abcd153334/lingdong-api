@@ -165,6 +165,9 @@ const CHANNELS = [
     name: "OpenAI 官方",
     adapter_id: "openai",
     base_url: "https://api.openai.com",
+    // 官网：渠道条外链与编辑抽屉的跳转按钮都读这两个字段
+    website: "https://openai.com",
+    website_url: "https://openai.com",
     multi_key_mode: "polling",
     groups: ["default", "vip"],
     weight: 10,
@@ -340,6 +343,17 @@ async function openChannel(page: Page, name = "OpenAI 官方") {
   await page.goto(`/admin/model-service?c=${ch.id}`);
   await expect(page.locator(".ms-chanbar b")).toHaveText(name);
 }
+/**
+ * 「新建渠道」的唯一入口在适配器浮层底部（左栏里不再有虚线槽）。
+ *
+ * `?c=` 深链下，右栏正在看的那条渠道所属的适配器卡片带 `aria-current="true"`，
+ * 据此定位 —— 不需要知道 fixture 里 adapter_id 与展示名的映射。
+ */
+async function openNewChannel(page: Page) {
+  await page.locator('.ms-adp[aria-current="true"]').first().click();
+  await page.getByRole("button", { name: "新建渠道", exact: true }).click();
+}
+
 test.describe("S4 渠道与适配器 · 管理台", () => {
 
   test("连通测试成功：展示命中密钥与耗时", async ({ page }) => {
@@ -379,6 +393,37 @@ test.describe("S4 渠道与适配器 · 管理台", () => {
     expect(calls).toContain("PUT /api/admin/channels/1");
   });
 
+  test("官网：渠道条与 Base URL 旁都有跳转入口，且可编辑/清空", async ({ page }) => {
+    await seedAuth(page, { role: 0 });
+    await stubAdmin(page);
+    await openChannel(page, "OpenAI 官方");
+
+    // 渠道条：不打开抽屉也能跳
+    const barLink = page.locator(".ms-chanbar__site");
+    await expect(barLink).toHaveAttribute("href", "https://openai.com");
+    await expect(barLink).toHaveAttribute("target", "_blank");
+    await expect(barLink).toHaveAttribute("rel", /noopener/);
+
+    await page.getByRole("button", { name: "编辑渠道" }).click();
+    const drawer = page.getByRole("dialog", { name: /编辑渠道 · OpenAI 官方/ });
+    await expect(drawer.locator("#chz-site")).toHaveValue("https://openai.com");
+
+    // Base URL 右侧的外链按钮：与输入框同一行（.field-row），且是新窗口打开
+    const go = drawer.locator(".field-row__go");
+    await expect(go).toHaveAttribute("href", "https://openai.com");
+    await expect(go).toHaveAttribute("target", "_blank");
+    await expect(go).toHaveAttribute("rel", "noopener noreferrer");
+
+    // 清空 = 显式提交空串（省略会变成"保持不变"，官网就永远删不掉）
+    await drawer.locator("#chz-site").fill("");
+    const req = page.waitForRequest(
+      (r) => r.url().endsWith("/api/admin/channels/1") && r.method() === "PUT",
+    );
+    await drawer.getByRole("button", { name: "保存" }).click();
+    const body = (await req).postDataJSON() as { website?: string };
+    expect(body.website).toBe("");
+  });
+
   test("删除有绑定模型的渠道被前置拦截", async ({ page }) => {
     await seedAuth(page, { role: 0 });
     const calls = await stubAdmin(page);
@@ -395,7 +440,7 @@ test.describe("S4 渠道与适配器 · 管理台", () => {
     const calls = await stubAdmin(page);
 
     await openChannel(page);
-    await page.getByRole("button", { name: "新建渠道", exact: true }).click();
+    await openNewChannel(page);
 
     const drawer = page.getByRole("dialog", { name: "新建渠道" });
     await drawer.locator("#chz-name").fill("新上游");
@@ -412,7 +457,7 @@ test.describe("S4 渠道与适配器 · 管理台", () => {
     await stubAdmin(page);
 
     await openChannel(page);
-    await page.getByRole("button", { name: "新建渠道", exact: true }).click();
+    await openNewChannel(page);
     const drawer = page.getByRole("dialog", { name: "新建渠道" });
     await drawer.locator("#chz-name").fill("纯标准上游");
     await drawer.locator("#chz-url").fill("https://api.example.com");
@@ -432,7 +477,7 @@ test.describe("S4 渠道与适配器 · 管理台", () => {
     await stubAdmin(page);
 
     await openChannel(page);
-    await page.getByRole("button", { name: "新建渠道", exact: true }).click();
+    await openNewChannel(page);
     const drawer = page.getByRole("dialog", { name: "新建渠道" });
     await drawer.locator("#chz-name").fill("声明式上游");
     await drawer.locator("#chz-url").fill("https://api.example.com");
@@ -452,7 +497,7 @@ test.describe("S4 渠道与适配器 · 管理台", () => {
     const calls = await stubAdmin(page);
 
     await openChannel(page);
-    await page.getByRole("button", { name: "新建渠道", exact: true }).click();
+    await openNewChannel(page);
     const drawer = page.getByRole("dialog", { name: "新建渠道" });
     await drawer.locator("#chz-name").fill("坏 JSON");
     await drawer.locator("#chz-url").fill("https://api.example.com");
@@ -470,7 +515,7 @@ test.describe("S4 渠道与适配器 · 管理台", () => {
     await stubAdmin(page);
 
     await openChannel(page);
-    await page.getByRole("button", { name: "新建渠道", exact: true }).click();
+    await openNewChannel(page);
     const drawer = page.getByRole("dialog", { name: "新建渠道" });
     await drawer.getByRole("button", { name: "Azure 风格", exact: true }).click();
 
@@ -549,7 +594,7 @@ test.describe("S4 渠道与适配器 · 管理台", () => {
     await stubAdmin(page);
 
     await openChannel(page);
-    await page.getByRole("button", { name: "新建渠道", exact: true }).click();
+    await openNewChannel(page);
     const drawer = page.getByRole("dialog", { name: "新建渠道" });
 
     // 默认 openai（fixture 未声明 supports_options）→ 整块不渲染，避免"配了没人读"
@@ -599,7 +644,7 @@ test.describe("S4 渠道与适配器 · 管理台", () => {
     const calls = await stubAdmin(page);
 
     await openChannel(page);
-    await page.getByRole("button", { name: "新建渠道", exact: true }).click();
+    await openNewChannel(page);
     const drawer = page.getByRole("dialog", { name: "新建渠道" });
     await drawer.locator("#chz-adapter").selectOption("autodl");
     await drawer.locator("#chz-name").fill("AutoDL 新建");
@@ -618,7 +663,7 @@ test.describe("S4 渠道与适配器 · 管理台", () => {
     await stubAdmin(page);
 
     await openChannel(page);
-    await page.getByRole("button", { name: "新建渠道", exact: true }).click();
+    await openNewChannel(page);
     const drawer = page.getByRole("dialog", { name: "新建渠道" });
 
     await drawer.locator("#chz-adapter").selectOption("metaso");
@@ -678,7 +723,7 @@ test.describe("S4 渠道与适配器 · 管理台", () => {
     await stubAdmin(page);
 
     await openChannel(page);
-    await page.getByRole("button", { name: "新建渠道", exact: true }).click();
+    await openNewChannel(page);
     const drawer = page.getByRole("dialog", { name: "新建渠道" });
 
     await drawer.locator("#chz-adapter").selectOption("duomiapi");
@@ -868,7 +913,7 @@ test.describe("密钥池：平铺、行内编辑与批量录入", () => {
     const calls = await stubAdmin(page);
     await openChannel(page);
 
-    await page.getByRole("button", { name: "新建渠道", exact: true }).click();
+    await openNewChannel(page);
     const drawer = page.getByRole("dialog", { name: "新建渠道" });
     await drawer.locator("#chz-name").fill("新上游");
     await drawer.locator("#chz-url").fill("https://api.example.com");
@@ -885,7 +930,7 @@ test.describe("密钥池：平铺、行内编辑与批量录入", () => {
     await stubAdmin(page);
     await openChannel(page);
 
-    await page.getByRole("button", { name: "新建渠道", exact: true }).click();
+    await openNewChannel(page);
     const drawer = page.getByRole("dialog", { name: "新建渠道" });
     await drawer.locator("#chz-name").fill("重复上游");
     await drawer.locator("#chz-url").fill("https://api.example.com");

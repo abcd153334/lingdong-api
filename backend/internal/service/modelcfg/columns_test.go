@@ -80,6 +80,17 @@ func TestUpdatesColumnsMatchModel(t *testing.T) {
 	}
 }
 
+// TestPresetGroupNotWrittenByModelcfg 守「内置标记只有一个所有者」。
+//
+// preset_group 由 presets 层用显式 UPDATE 写。一旦它回到全列写里，
+// 管理台保存一次价目就会把标记清空（Input 里没有这个字段 → 零值覆盖），
+// 表现是「恢复出厂」突然找不到任何内置行，且完全没有报错线索。
+func TestPresetGroupNotWrittenByModelcfg(t *testing.T) {
+	if _, ok := Updates(&model.Model{})["preset_group"]; ok {
+		t.Fatal("preset_group 不该由 modelcfg 全列写：它会让每次保存都清空内置标记")
+	}
+}
+
 // priceColumns 从 model.Prices 反射出全部 gorm 列名（唯一真相源）。
 func priceColumns(t *testing.T) []string {
 	t.Helper()

@@ -16,6 +16,16 @@ export interface PopoverProps {
   onClose: () => void;
   /** 触发器节点：定位基准 + 关闭后的焦点落点 */
   anchorRef: RefObject<HTMLElement | null>;
+  /**
+   * `prefer="right"` 时的纵向基准，以及关闭后的焦点落点（缺省回 `anchorRef`）。
+   *
+   * 为什么要把"关掉后焦点回哪"单独给一个 prop：二级导航的水平锚是整栏 `<aside>`，
+   * 它不可聚焦，回焦到它等于把焦点丢到 body —— 键盘用户按 Esc 之后就找不到原位置了。
+   */
+  alignRef?: RefObject<HTMLElement | null>;
+  returnFocusRef?: RefObject<HTMLElement | null>;
+  /** 值变化即重新定位（锚点换了但 `open` 没变时用，例如从 A 卡切到 B 卡） */
+  repositionKey?: unknown;
   children: ReactNode;
   /** 附加类名（面板形态由组件自己给，例如 ipop / epop / ntp） */
   className?: string;
@@ -26,7 +36,7 @@ export interface PopoverProps {
   matchWidth?: boolean;
   /** 可用空间不足时压缩到的上限（px） */
   maxHeight?: number;
-  prefer?: "above" | "below";
+  prefer?: "above" | "below" | "right";
   gap?: number;
   /** 画指向锚点的尖角（需要调用方保证 `.pop--arrow` 没有被裁切的子元素） */
   arrow?: boolean;
@@ -63,6 +73,9 @@ export function Popover(props: PopoverProps) {
     open,
     onClose,
     anchorRef,
+    alignRef,
+    returnFocusRef,
+    repositionKey,
     children,
     className,
     id,
@@ -86,6 +99,8 @@ export function Popover(props: PopoverProps) {
   const box = useAnchoredLayerBox({
     open: visible,
     anchorRef,
+    alignRef,
+    repositionKey,
     popRef,
     prefer,
     gap,
@@ -93,7 +108,13 @@ export function Popover(props: PopoverProps) {
     matchWidth,
   });
   const style = (
-    arrow ? { ...box.style, "--pop-arrow-x": `${box.arrowX}px` } : box.style
+    arrow
+      ? {
+          ...box.style,
+          "--pop-arrow-x": `${box.arrowX}px`,
+          "--pop-arrow-y": `${box.arrowY}px`,
+        }
+      : box.style
   ) as PopStyle;
 
   useEffect(() => {
@@ -134,7 +155,7 @@ export function Popover(props: PopoverProps) {
 
   /** 关掉并把焦点交回触发器（Esc / Tab 都要落在这里，否则焦点掉到 body）。 */
   const closeAndRestoreFocus = (): void => {
-    anchorRef.current?.focus();
+    (returnFocusRef?.current ?? anchorRef.current)?.focus();
     closeRef.current();
   };
 
@@ -149,6 +170,7 @@ export function Popover(props: PopoverProps) {
         "pop",
         arrow && "pop--arrow",
         arrow && box.placement === "above" && "pop-above",
+        arrow && box.placement === "right" && "pop--arrow-left",
         className,
       )}
       style={style}

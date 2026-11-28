@@ -26,11 +26,6 @@ const STATUS_MAP: Record<string, [TagTone, string]> = {
   // 兑换码派生状态（S16，来源后端 redeem.StatusOf）
   available: ["success", "可用"],
   used: ["gray", "已用"],
-  // 上游同步 diff 状态（G14，色调对齐原型 admin-models.html:556 SYNC_ST）
-  new: ["success", "新增"],
-  diff: ["warning", "有差异"],
-  same: ["gray", "一致"],
-  deprecated: ["danger", "已停售"],
   // 文件类型（门户文件页按 content_type 归类，见 fileTypeKey）
   image: ["info", "图片"],
   audio: ["success", "音频"],

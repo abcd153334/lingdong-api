@@ -126,16 +126,29 @@ func main() {
 		if err := db.Seed(gdb); err != nil {
 			return fmt.Errorf("种子数据: %w", err)
 		}
-		// 内置厂商预设（火山方舟等）：独立开关 LD_BUILTIN_PRESETS、独立幂等标记，
-		// 默认**全部停用**，等运营填自己的密钥后再启用。必须在 AutoMigrate / Seed 之后。
+		// 出厂预设（现网导出的 5 组 + 代码策展的方舟组）：独立开关 LD_BUILTIN_PRESETS、
+		// 每组独立幂等标记，默认**全部停用 + 空密钥**，等运营填自己的密钥后再启用。
+		// 必须在 AutoMigrate / Seed 之后（依赖 vendors 与 models 表）。
 		if err := presets.Seed(gdb); err != nil {
 			return fmt.Errorf("内置厂商预设: %w", err)
+		}
+		// 认领存量行（一次性）：老库升级时只复用不新建，若不补 preset_group，
+		// 「内置」徽标与「恢复出厂」在最需要它们的机器上永远没有对象。
+		// 只补标记、不改业务字段；模型必须确实绑在该渠道上才认领。
+		if err := presets.Adopt(gdb); err != nil {
+			return fmt.Errorf("内置预设认领: %w", err)
 		}
 		// 支付相关数据迁移（幂等）：回填 orders.expire_at 与支付身份、关闭不可支付订单、
 		// 给存量库补齐 pay_channels 的 protocol 与虎皮椒渠道。必须在 LoadSystemConfig 之前，
 		// 否则补齐的渠道进不了内存镜像。
 		if err := db.RunMigrations(gdb); err != nil {
 			return fmt.Errorf("数据迁移: %w", err)
+		}
+		// 渠道官网回填（一次性）：给 website 为空的存量渠道补上适配器默认官网。
+		// 必须在 presets.Seed 之后（新装渠道自带官网，回填只处理存量），
+		// 且与 MigrateChannelOptions 同级放在迁移锁内。
+		if err := channelsvc.BackfillWebsites(gdb); err != nil {
+			return fmt.Errorf("渠道官网回填: %w", err)
 		}
 		// 渠道私有配置清理（幂等）：删掉适配器已不认识的废弃键。
 		// 必须紧跟在 RunMigrations 之后、开始服务之前 —— 放在业务启动后会有一段

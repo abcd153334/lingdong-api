@@ -58,6 +58,7 @@ const GPT4O = {
   is_default: true,
   endpoints: null,
   bindings: 2,
+  version: 1,
   input_price: 3,
   output_price: 15,
   cache_price: null,
@@ -183,6 +184,7 @@ const CHANNEL = {
 /** 记录已发生的请求；管理台必须在 /api/admin/** 打桩（否则真实 401 触发全局登出） */
 async function stub(page: Page, captures: { url: string; body: unknown }[] = []): Promise<string[]> {
   const calls: string[] = [];
+  upstreamSearches.length = 0;
   // 可灵图标存档：PUT 存进来、下一次 GET 原样吐回去。
   // 没有它就测不到「清除」——清除按钮只在**已有图标**时出现。
   let klingIcon = "";
@@ -293,36 +295,52 @@ async function stub(page: Page, captures: { url: string; body: unknown }[] = [])
         captures.push({ url: u.pathname, body: req.postDataJSON() });
         return route.fulfill({ json: envelope({ enabled: false }) });
       }
+      // 模型保存走 PUT（带 version 乐观锁）。没有这条分支时保存会落到兜底
+      // envelope(null)，"填入后保存"就断不了请求体。
+      if (u.pathname === "/api/admin/models/gpt-4o" && req.method() === "PUT") {
+        captures.push({ url: u.pathname, body: req.postDataJSON() });
+        return route.fulfill({ json: envelope({ item: GPT4O }) });
+      }
       // 绑定只有**单条**写入口：PUT/DELETE /models/:id/bindings/:channelId
       if (/^\/api\/admin\/models\/gpt-4o\/bindings\/\d+$/.test(u.pathname)) {
         captures.push({ url: u.pathname, body: req.postDataJSON() });
         return route.fulfill({ json: envelope({ bindings: 1, warnings: [] }) });
       }
-      if (u.pathname === "/api/admin/upstream/sources") {
-        return route.fulfill({
-          json: envelope({
-            sources: [
-              { id: "src-1", name: "上游 A", ok: true },
-              { id: "src-2", name: "上游 B", ok: false, err: "连通失败" },
-            ],
-          }),
-        });
-      }
-      if (u.pathname === "/api/admin/upstream/preview") {
-        captures.push({ url: u.pathname, body: req.postDataJSON() });
+      // 上游参考价：只读查询。**站点币种是 USD**（helpers 注入 currency:"USD"），
+      // 所以 *_micro 必须与美元同值（$2.5 → 2_500_000 微）；写死成人民币折算值
+      // 会把契约锁在一个"USD 站点按 7.2 折算"的假前提上。
+      if (u.pathname === "/api/admin/upstream/search") {
+        const kw = u.searchParams.get("keyword") ?? "";
+        upstreamSearches.push({ keyword: kw, vendor: u.searchParams.get("vendor") ?? "" });
         return route.fulfill({
           json: envelope({
             items: [
               {
+                id: "openai/gpt-4o",
                 name: "gpt-4o",
-                vendor: "openai",
+                provider_id: "openai",
+                provider_name: "OpenAI",
                 modality: "chat",
-                input_price: 2.5,
-                output_price: 10,
-                cache_price: null,
-                status: 1,
+                deprecated: false,
+                provider_count: 3,
+                input_usd: 2.5,
+                output_usd: 10,
+                cache_usd: null,
+                input_micro: 2_500_000,
+                output_micro: 10_000_000,
+                cache_micro: null,
               },
             ],
+            meta: {
+              source: "models.dev",
+              fetched_at: "2026-11-26T02:00:00Z",
+              stale: false,
+              currency: "USD",
+              fx_rate: 1,
+              matched_keyword: kw,
+              total: 1,
+              with_price: 1,
+            },
           }),
         });
       }
@@ -333,6 +351,9 @@ async function stub(page: Page, captures: { url: string; body: unknown }[] = [])
 }
 
 /** 合并页：用 `?c=` 落到一条渠道，右栏就是它的模型（没有独立的模型列表页了）。 */
+/** 记录本用例里打过的上游参考价请求（关键词/供应商偏好）。 */
+const upstreamSearches: { keyword: string; vendor: string }[] = [];
+
 async function openModels(page: Page) {
   await page.goto("/admin/model-service?c=1");
   await expect(page.locator(".ms-chanbar b")).toHaveText("OpenAI 官方");
@@ -357,9 +378,12 @@ test.describe("S20 模型管理 · 管理台（契约级）", () => {
     // 工具条只有右栏有搜索与筛选（左栏刻意不做）
     await expect(page.locator(".pbar-fields input")).toHaveCount(1);
     await expect(page.locator(".pbar-fields .esel")).toHaveCount(1);
-    for (const name of ["新建模型", "绑定已有模型", "供应商", "上游同步"]) {
+    for (const name of ["新建模型", "绑定已有模型", "供应商"]) {
       await expect(page.locator(".pbar .acts").getByRole("button", { name })).toBeVisible();
     }
+    // 旧的「上游同步」入口已删除：上游参考价现在只从模型编辑弹窗底栏进入，
+    // 留在工具条上等于同一件事两个入口（且那个入口根本不知道你在编辑哪个模型）。
+    await expect(page.getByRole("button", { name: "上游同步" })).toHaveCount(0);
 
     const gptRow = page.locator(".tbl tbody tr", { hasText: "gpt-4o" });
     await expect(gptRow).toContainText("GPT-4o");
@@ -379,6 +403,12 @@ test.describe("S20 模型管理 · 管理台（契约级）", () => {
     await openModels(page);
 
     await page.locator(".tbl tbody tr", { hasText: "gpt-4o" }).getByRole("button", { name: "停用模型" }).click();
+    // 渠道视图里的停用是**全局**的：先确认"所有渠道一起下线"，
+    // 否则它会被理解成"只关本渠道"（关本渠道要用「绑定设置」里的绑定启停）。
+    const scope = page.getByRole("dialog", { name: "停用模型（全部渠道）" });
+    await expect(scope).toBeVisible();
+    await expect(scope).toContainText("所有渠道");
+    await scope.getByRole("button", { name: "全部渠道停用" }).click();
     await expect
       .poll(() => captures.some((c) => c.url === "/api/admin/models/gpt-4o" && c.body?.enabled === false))
       .toBe(true);
@@ -464,26 +494,164 @@ test.describe("S20 模型管理 · 管理台（契约级）", () => {
     expect(calls.some((c) => c.startsWith("POST /api/admin/models"))).toBe(false);
   });
 
-  test("上游同步：来源可选性与预览契约", async ({ page }) => {
+  test("上游参考价：打开即按当前模型的上游名查询，只读不写库", async ({ page }) => {
+    await seedAuth(page, { role: 0 });
+    const captures: { url: string; body: unknown }[] = [];
+    const calls = await stub(page, captures);
+    await openModels(page);
+
+    await page
+      .locator(".tbl tbody tr", { hasText: "gpt-4o" })
+      .getByRole("button", { name: "编辑模型" })
+      .click();
+    const form = page.getByRole("dialog", { name: "编辑模型 gpt-4o" });
+    await expect(form).toBeVisible();
+
+    await form.getByRole("button", { name: "上游参考价" }).click();
+    // 内层是 portal 到 body 的二级弹窗：只能用 page 级定位，套 form.locator 会找不到
+    const panel = page.getByRole("dialog", { name: "上游参考价" });
+    await expect(panel).toBeVisible();
+
+    // 自动搜索用的是当前模型名，不需要用户再敲一遍
+    await expect(panel.locator("#up-kw")).toHaveValue("gpt-4o");
+    await expect.poll(() => upstreamSearches.length).toBeGreaterThan(0);
+    expect(upstreamSearches[0]).toEqual({ keyword: "gpt-4o", vendor: "openai" });
+
+    // 双口径 + 口径声明：站点是 USD，所以只显示美元价，不出现汇率行
+    const row = panel.locator(".tbl tbody tr", { hasText: "gpt-4o" });
+    await expect(row).toContainText("$2.5");
+    await expect(panel).toContainText("不是你这条渠道的结算价");
+    await expect(panel).not.toContainText("1 美元 ≈");
+
+    // 查询是只读的：打开面板不能产生任何模型写请求
+    expect(captures.some((c) => c.url.startsWith("/api/admin/models"))).toBe(false);
+    expect(calls.some((c) => c.startsWith("GET /api/admin/upstream/search"))).toBe(true);
+  });
+
+  test("上游参考价：单项填入只改表单，保存时才带着新价提交", async ({ page }) => {
     await seedAuth(page, { role: 0 });
     const captures: { url: string; body: unknown }[] = [];
     await stub(page, captures);
     await openModels(page);
 
-    await page.getByRole("button", { name: "上游同步" }).click();
-    const dialog = page.getByRole("dialog", { name: "上游模型同步" });
-    await expect(dialog).toBeVisible();
-    await expect(dialog).toContainText("上游 A");
-    await expect(dialog).toContainText("连通失败");
+    await page
+      .locator(".tbl tbody tr", { hasText: "gpt-4o" })
+      .getByRole("button", { name: "编辑模型" })
+      .click();
+    const form = page.getByRole("dialog", { name: "编辑模型 gpt-4o" });
+    await form.getByRole("button", { name: "上游参考价" }).click();
 
-    await dialog.getByRole("button", { name: /上游 A/ }).click();
-    await dialog.getByRole("button", { name: "获取预览" }).click();
+    const panel = page.getByRole("dialog", { name: "上游参考价" });
+    const row = panel.locator(".tbl tbody tr", { hasText: "gpt-4o" });
+    // 输入价与输出价有报价 → 各一个「填入」；缓存价上游没报 → 没有按钮
+    await expect(row.getByRole("button", { name: "填入" })).toHaveCount(2);
+    await row.getByRole("button", { name: "填入" }).first().click();
+
+    // 填入后仍是表单草稿：输入框已是新价，但还没有任何 PUT
+    await expect(form.locator("#mf-p-input")).toHaveValue("2.5");
+    expect(captures.some((c) => c.url === "/api/admin/models/gpt-4o")).toBe(false);
+
+    await panel.getByRole("button", { name: "关闭" }).click();
+    await form.getByRole("button", { name: "保存" }).click();
 
     await expect
-      .poll(() => captures.some((c) => c.url === "/api/admin/upstream/preview"))
-      .toBe(true);
-    // 限定预览弹层内的行：背后模型列表同样含 gpt-4o（hasText 大小写不敏感），不限定会 strict 冲突
-    await expect(dialog.locator(".tbl tbody tr", { hasText: "gpt-4o" })).toBeVisible();
+      .poll(() => captures.filter((c) => c.url === "/api/admin/models/gpt-4o").length)
+      .toBe(1);
+    const saved = captures.find((c) => c.url === "/api/admin/models/gpt-4o")!.body as {
+      input_price?: number;
+      version?: number;
+    };
+    // 量纲：表单里是"2.5"，提交必须是 2_500_000 微（少乘 1e6 = 全站计费归零）
+    expect(saved.input_price).toBe(2_500_000);
+    expect(typeof saved.version).toBe("number");
+  });
+
+  test("上游参考价：按规格计费的模型只比价、不给填入", async ({ page }) => {
+    await seedAuth(page, { role: 0 });
+    await stub(page);
+    await openModels(page);
+
+    await page
+      .locator(".tbl tbody tr", { hasText: "flux-img" })
+      .getByRole("button", { name: "编辑模型" })
+      .click();
+    const form = page.getByRole("dialog", { name: "编辑模型 flux-img" });
+    await form.getByRole("button", { name: "上游参考价" }).click();
+
+    const panel = page.getByRole("dialog", { name: "上游参考价" });
+    await expect(panel).toBeVisible();
+    await expect(panel.locator(".tbl tbody tr", { hasText: "gpt-4o" })).toBeVisible();
+    // 把 token 价塞进「按张」字段是量纲事故，所以整列填入都不渲染
+    await expect(panel.getByRole("button", { name: "填入" })).toHaveCount(0);
+    await expect(panel).toContainText("参考价仅用于比价");
+  });
+
+  test("上游参考价：新建模型无名字时不发请求，手输后才查", async ({ page }) => {
+    await seedAuth(page, { role: 0 });
+    const calls = await stub(page);
+    await openModels(page);
+
+    await page.getByRole("button", { name: "新建模型" }).click();
+    const form = page.getByRole("dialog", { name: "新建模型" });
+    await form.getByRole("button", { name: "上游参考价" }).click();
+
+    const panel = page.getByRole("dialog", { name: "上游参考价" });
+    await expect(panel.locator("#up-kw")).toHaveValue("");
+    await expect(panel).toContainText("输入模型名查询参考价");
+    // 空关键词不该打后端（会白拉一次 7MB 快照）
+    expect(calls.some((c) => c.startsWith("GET /api/admin/upstream/search"))).toBe(false);
+
+    await panel.locator("#up-kw").fill("claude");
+    await panel.locator("#up-kw").press("Enter");
+    await expect.poll(() => upstreamSearches.some((s) => s.keyword === "claude")).toBe(true);
+  });
+
+  test("上游参考价：Esc 只关面板，不关掉背后的模型表单", async ({ page }) => {
+    await seedAuth(page, { role: 0 });
+    await stub(page);
+    await openModels(page);
+
+    await page
+      .locator(".tbl tbody tr", { hasText: "gpt-4o" })
+      .getByRole("button", { name: "编辑模型" })
+      .click();
+    const form = page.getByRole("dialog", { name: "编辑模型 gpt-4o" });
+    await form.getByRole("button", { name: "上游参考价" }).click();
+    await expect(page.getByRole("dialog", { name: "上游参考价" })).toHaveClass(/open/);
+
+    await page.keyboard.press("Escape");
+    // 弹层栈只有栈顶响应 Esc：内层关掉，外层表单还在（草稿不能丢）
+    await expect(page.getByRole("dialog", { name: "上游参考价" })).not.toHaveClass(/open/);
+    await expect(form).toHaveClass(/open/);
+  });
+
+  test("上游参考价：375px 底栏入口独占一行，不压字不溢出", async ({ page }) => {
+    await seedAuth(page, { role: 0 });
+    await stub(page);
+    await page.setViewportSize({ width: 375, height: 780 });
+    await openModels(page);
+
+    await page
+      .locator(".tbl tbody tr", { hasText: "gpt-4o" })
+      .getByRole("button", { name: "编辑模型" })
+      .click();
+    const form = page.getByRole("dialog", { name: "编辑模型 gpt-4o" });
+    await expect(form.getByRole("button", { name: "上游参考价" })).toBeVisible();
+
+    // 4 个按钮等分 335px 每个只有 76px，而「上游参考价」需约 99px —— 所以入口必须独占一行
+    const geom = await form.locator(".dl-foot").evaluate((el) => {
+      const start = el.querySelector(".dl-foot__start") as HTMLElement;
+      const foot = el as HTMLElement;
+      return {
+        overflow: foot.scrollWidth - foot.clientWidth,
+        startW: Math.round(start.getBoundingClientRect().width),
+        footW: Math.round(foot.getBoundingClientRect().width),
+        padL: parseFloat(getComputedStyle(foot).paddingLeft),
+        padR: parseFloat(getComputedStyle(foot).paddingRight),
+      };
+    });
+    expect(geom.overflow).toBeLessThanOrEqual(0);
+    expect(geom.startW).toBeGreaterThanOrEqual(geom.footW - geom.padL - geom.padR - 1);
   });
 
   test("图片档位：目录拉不到时五个档位不缺档，未设默认档就地提示", async ({ page }) => {

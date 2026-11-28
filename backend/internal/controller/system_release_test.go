@@ -3,9 +3,11 @@ package controller
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -99,7 +101,12 @@ func releaseCtx(t *testing.T, method, path string, body any) (*gin.Context, *htt
 func TestReleasePayloadNotConfigured(t *testing.T) {
 	gdb := withReleaseDB(t)
 	_ = gdb
-	conf.System().Reload(map[string]json.RawMessage{})
+	// "未配置" 在加了出厂默认清单地址（releasecheck.DefaultManifestURL）之后有了新含义：
+	// 空配置 = 用官方清单（算已配置）。要表达"这台实例不检查更新"只能显式写 off。
+	// 旧用例把"空 = 未配置"当成了不变量，默认值一落地它就恒红。
+	conf.System().Reload(map[string]json.RawMessage{
+		"release_manifest_url": json.RawMessage(`"off"`),
+	})
 	t.Cleanup(func() { conf.System().Reload(map[string]json.RawMessage{}) })
 
 	c, w := releaseCtx(t, http.MethodGet, "/api/admin/system/release", nil)
@@ -127,6 +134,21 @@ func TestReleasePayloadNotConfigured(t *testing.T) {
 	}
 }
 
+// nextPatchVersion 把 "vX.Y.Z" 的 Z 加一（解析失败时退回一个必然更高的值）。
+//
+// 存在的理由：发布版本的用例只能相对当前版本写，任何绝对版本号都会在下次发版时翻红。
+func nextPatchVersion(v string) string {
+	parts := strings.Split(strings.TrimPrefix(v, "v"), ".")
+	if len(parts) != 3 {
+		return "v99.0.0"
+	}
+	z, err := strconv.Atoi(parts[2])
+	if err != nil {
+		return "v99.0.0"
+	}
+	return fmt.Sprintf("v%s.%s.%d", parts[0], parts[1], z+1)
+}
+
 func TestReleaseUpdateRejectsBadTag(t *testing.T) {
 	withReleaseDB(t)
 	for _, tag := range []string{"", "latest", "v2.1.0;ls", "../x", "v2.1"} {
@@ -152,15 +174,19 @@ func TestReleaseUpdateRejectsDowngrade(t *testing.T) {
 func TestReleaseUpdateInProgressThenCurrent(t *testing.T) {
 	gdb := withReleaseDB(t)
 
+	// 目标版本必须**从 Version 派生**：写死 "v2.2.0" 时它会随发布变成"降级"，
+	// 于是这条用例在 v2.2.11 那天开始恒红 —— 而它真正要测的是"第二条 active 冲突"。
+	first := nextPatchVersion(Version)
 	c1, w1 := releaseCtx(t, http.MethodPost, "/api/admin/system/release/update",
-		map[string]any{"target_tag": "v2.2.0", "request_id": "req-first-0001"})
+		map[string]any{"target_tag": first, "request_id": "req-first-0001"})
 	AdminReleaseUpdate(c1)
 	if w1.Code != 200 {
-		t.Fatalf("首次提交应 200，实际 %d（%s）", w1.Code, w1.Body.String())
+		t.Fatalf("首次提交应 200（目标 %s，当前 %s），实际 %d（%s）",
+			first, Version, w1.Code, w1.Body.String())
 	}
 
 	c2, w2 := releaseCtx(t, http.MethodPost, "/api/admin/system/release/update",
-		map[string]any{"target_tag": "v2.3.0", "request_id": "req-second-001"})
+		map[string]any{"target_tag": nextPatchVersion(first), "request_id": "req-second-001"})
 	AdminReleaseUpdate(c2)
 	if w2.Code != http.StatusConflict {
 		t.Fatalf("第二条 active 应 409，实际 %d（%s）", w2.Code, w2.Body.String())

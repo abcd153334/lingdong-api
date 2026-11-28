@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"math"
 	"math/rand"
+	"net/url"
 	"regexp"
 	"strconv"
 	"strings"
@@ -26,6 +27,7 @@ import (
 	"lingdong-api/internal/pkg/netguard"
 	"lingdong-api/internal/pkg/pagination"
 	"lingdong-api/internal/relay"
+	"lingdong-api/internal/relay/adapters"
 	"lingdong-api/internal/service/channelhealth"
 	"lingdong-api/internal/service/channellimit"
 	iconsvc "lingdong-api/internal/service/icon"
@@ -103,9 +105,15 @@ type Item struct {
 	Icon string `json:"icon"`
 	// IconURL 是同一个图标的可渲染地址（空 = 首字占位）。
 	// 列表、抽屉、绑定行都直接 `<img src>`，不再自己拼路径。
-	IconURL        string   `json:"icon_url"`
-	AdapterID      string   `json:"adapter_id"`
-	BaseURL        string   `json:"base_url"`
+	IconURL   string `json:"icon_url"`
+	AdapterID string `json:"adapter_id"`
+	BaseURL   string `json:"base_url"`
+	// Website 是渠道**自己配置**的上游官网（"" = 未配置，回落到适配器默认）。
+	// 表单必须拿它回填：把派生值写回去等于把「继承」固化成「自定义」。
+	Website string `json:"website"`
+	// WebsiteURL 是可直接跳转的**有效**官网：自己配置的优先，否则适配器默认。
+	// 与 icon / icon_url 同一形态：令牌给表单，地址给展示方，回落规则只在后端算一次。
+	WebsiteURL     string   `json:"website_url"`
 	MultiKeyMode   string   `json:"multi_key_mode"`
 	Groups         []string `json:"groups"`
 	Weight         int      `json:"weight"`
@@ -138,6 +146,11 @@ type Item struct {
 	// Window 是熔断滑窗内的实时样本（仅当该渠道窗口内有流量时下发）
 	Window      *channelhealth.Window `json:"window,omitempty"`
 	BoundModels []BoundModel          `json:"bound_models"`
+	// PresetGroup 是「出厂内置」标记（"" = 运营自建）。
+	//
+	// 只用于展示（徽标）与入口可见性：管理台据此标出哪些行会被「恢复出厂」覆盖。
+	// 它不是编辑开关 —— 内置渠道照样可以改名、改价、删除。
+	PresetGroup string `json:"preset_group"`
 }
 
 // Req 是创建/编辑渠道的入参（编辑时 Keys 为空表示不修改密钥池）。
@@ -145,9 +158,12 @@ type Req struct {
 	Name string
 	// Icon 为 nil 表示"本次不修改"（AI 的增量补丁不带它）；
 	// 显式 `""` 表示清空（回到首字占位）。用 *string 才能区分这两件事。
-	Icon           *string
-	AdapterID      string
-	BaseURL        string
+	Icon      *string
+	AdapterID string
+	BaseURL   string
+	// Website 为 nil 表示"本次不修改"；显式 `""` 表示清空（回到适配器默认官网）。
+	// 与 Icon 同一种三态，否则「清空官网」永远保存不进去。
+	Website        *string
 	MultiKeyMode   string
 	Groups         []string
 	Weight         int
@@ -163,6 +179,13 @@ type Req struct {
 	AdapterConfig json.RawMessage
 	// AdapterOptions 语义同上：nil = 不修改；显式 null/{} = 清空（回到适配器内置默认）。
 	AdapterOptions json.RawMessage
+
+	// allowEmptyKeys 只由 CreateFactoryTx 置位（出厂预设渠道恒无密钥）。
+	//
+	// 为什么需要这个例外：`validateWith` 的「新建至少 1 个密钥」是为了防止
+	// "启用了却一把 key 都没有"的渠道；而出厂渠道**强制停用**，空密钥是设计事实
+	// （写假密钥会让探活把它判成"密钥无效"）。这个开关不对外暴露，管理台/AI 都拿不到。
+	allowEmptyKeys bool
 }
 
 // TestResult 是渠道连通测试结果。
@@ -298,7 +321,7 @@ func List(q ListQuery, base string) ([]Item, int64, error) {
 	for i := range rows {
 		ids = append(ids, rows[i].ID)
 	}
-	bounds := boundModelsByChannel(ids, base)
+	bounds := boundModelsByChannel(db.DB, ids, base)
 	items := make([]Item, 0, len(rows))
 	for i := range rows {
 		items = append(items, toItem(&rows[i], bounds[rows[i].ID], base))
@@ -359,11 +382,28 @@ func ensureNameFreeTx(gdb *gorm.DB, name string, selfID uint64) error {
 
 func Create(req Req, base string) (*Item, error) { return CreateTx(db.DB, req, base) }
 
+// CreateFactoryTx 创建**出厂预设**渠道：空密钥 + 强制停用。
+//
+// 与 CreateTx 共用全部校验（适配器/BaseURL/options/分组/重名），只放开两件事：
+//   - 允许空密钥池：出厂渠道不写假密钥（假密钥会被探活判成"密钥无效"）；
+//   - 落库即停用：没有任何密钥的渠道绝不能参与选路。
+//
+// 仅供 service/presets 调用。管理台/AI 仍走 CreateTx，它们的"至少 1 个密钥"规则不变。
+func CreateFactoryTx(gdb *gorm.DB, req Req) (*Item, error) {
+	req.allowEmptyKeys = true
+	return createTx(gdb, req, "", true)
+}
+
 // CreateTx 在指定连接/事务上创建渠道（AI 提案 apply 用）。
 //
 // 只把 `db.DB` 换成参数，业务规则一行未改 —— 这一点是刻意的：
 // 任何"顺手优化"都会让人工保存与 AI 应用走两条不同的校验路径。
 func CreateTx(gdb *gorm.DB, req Req, base string) (*Item, error) {
+	return createTx(gdb, req, base, false)
+}
+
+// createTx 是创建渠道的唯一实现；factory 只影响"初始状态"（停用）与空密钥许可。
+func createTx(gdb *gorm.DB, req Req, base string, factory bool) (*Item, error) {
 	if err := req.normalize(); err != nil {
 		return nil, err
 	}
@@ -378,7 +418,14 @@ func CreateTx(gdb *gorm.DB, req Req, base string) (*Item, error) {
 	if err := ensureNameFreeTx(gdb, req.Name, 0); err != nil {
 		return nil, err
 	}
-	keys, err := EncryptKeys(req.Keys)
+	keys, err := func() (model.JSON, error) {
+		// 出厂渠道的空密钥：不能走 EncryptKeys（它要求至少一条）。
+		// 写空数组而不是 NULL：与「运营有密钥但全被禁用」的存储形态一致，读侧无需特判。
+		if factory && len(req.Keys) == 0 {
+			return model.MustJSON([]string{}), nil
+		}
+		return EncryptKeys(req.Keys)
+	}()
 	if err != nil {
 		return nil, err
 	}
@@ -394,11 +441,17 @@ func CreateTx(gdb *gorm.DB, req Req, base string) (*Item, error) {
 	if err != nil {
 		return nil, err
 	}
+	var status int16 = StatusEnabled
+	if factory {
+		// 出厂渠道恒停用：空密钥 + 启用 = 每次请求都失败。
+		status = StatusDisabled
+	}
 	c := model.Channel{
 		Name:           req.Name,
 		Icon:           iconValue(req.Icon),
 		AdapterID:      req.AdapterID,
 		BaseURL:        req.BaseURL,
+		Website:        stringValue(req.Website),
 		Keys:           keys,
 		MultiKeyMode:   req.MultiKeyMode,
 		Groups:         groups,
@@ -406,7 +459,7 @@ func CreateTx(gdb *gorm.DB, req Req, base string) (*Item, error) {
 		Priority:       req.Priority,
 		RPMLimit:       req.RPMLimit,
 		MaxConcurrency: req.MaxConcurrency,
-		Status:         StatusEnabled,
+		Status:         status,
 		AutoBan:        req.AutoBan,
 		SwitchKeyRetry: req.SwitchKeyRetry,
 		Health:         model.MustJSON(Health{}),
@@ -506,6 +559,10 @@ func UpdateTx(gdb *gorm.DB, id uint64, req Req, expectVersion int, base string) 
 		// 同 adapter_config 一类坑：漏掉这行就是「换了图标，保存后还是旧的」。
 		updates["icon"] = *req.Icon
 	}
+	if req.Website != nil {
+		// 同上：漏掉这行就是「改了官网，保存后按钮还在跳旧站」。
+		updates["website"] = *req.Website
+	}
 	// 换适配器必须清空私有配置。
 	//
 	// 旧适配器的键在新适配器解析时是未知字段（各适配器 DisallowUnknownFields），
@@ -532,7 +589,7 @@ func UpdateTx(gdb *gorm.DB, id uint64, req Req, expectVersion int, base string) 
 	if err != nil {
 		return nil, err
 	}
-	item := toItem(c, boundModelsByChannel([]uint64{id}, base)[id], base)
+	item := toItem(c, boundModelsByChannel(gdb, []uint64{id}, base)[id], base)
 	return &item, nil
 }
 
@@ -587,7 +644,7 @@ func SetStatusTx(gdb *gorm.DB, id uint64, status int, base string) (*Item, error
 		return nil, err
 	}
 	c.Status = int16(status)
-	item := toItem(c, boundModelsByChannel([]uint64{id}, base)[id], base)
+	item := toItem(c, boundModelsByChannel(gdb, []uint64{id}, base)[id], base)
 	return &item, nil
 }
 
@@ -854,6 +911,8 @@ func toItem(c *model.Channel, bounds []BoundModel, base string) Item {
 		IconURL:         iconref.URL(base, c.Icon),
 		AdapterID:       c.AdapterID,
 		BaseURL:         c.BaseURL,
+		Website:         c.Website,
+		WebsiteURL:      effectiveWebsite(c),
 		MultiKeyMode:    c.MultiKeyMode,
 		Groups:          decodeStrings(c.Groups),
 		Weight:          c.Weight,
@@ -884,6 +943,7 @@ func toItem(c *model.Channel, bounds []BoundModel, base string) Item {
 			return json.RawMessage(raw)
 		}(),
 		BoundModels: bounds,
+		PresetGroup: c.PresetGroup,
 	}
 }
 
@@ -902,6 +962,10 @@ func (r *Req) normalize() error {
 	if r.Icon != nil {
 		v := strings.TrimSpace(*r.Icon)
 		r.Icon = &v
+	}
+	if r.Website != nil {
+		v := strings.TrimSpace(*r.Website)
+		r.Website = &v
 	}
 	if r.MultiKeyMode == "" {
 		r.MultiKeyMode = ModeRandom
@@ -956,6 +1020,14 @@ func iconValue(p *string) string {
 	return *p
 }
 
+// stringValue 取可选字符串的落库值（nil 视为空串，供新建用）。
+func stringValue(p *string) string {
+	if p == nil {
+		return ""
+	}
+	return *p
+}
+
 // configuredGroups 读取当前**实际配置**的分组折扣表（与计费侧同一真相源）。
 //
 // 返回 nil 表示「无真相源可比对」（配置未加载或 JSON 损坏），调用方据此跳过校验，
@@ -992,6 +1064,11 @@ func (r Req) validateWith(gdb *gorm.DB, isCreate bool) error {
 	if err := netguard.ValidateURL(r.BaseURL, netguard.PolicyFromEnv()); err != nil {
 		return errors.New("channel: Base URL 不合法（需为 http/https 公网地址；自建内网需开启 LD_UPSTREAM_ALLOW_PRIVATE）")
 	}
+	// 官网是**展示链接**，不是出站地址：不能走 netguard（它会拒私网/回环），
+	// 但必须拦住 javascript:/data: 这类可执行 scheme 与带凭据的 URL。
+	if err := validateWebsite(r.Website); err != nil {
+		return err
+	}
 	if r.MultiKeyMode != ModePolling && r.MultiKeyMode != ModeRandom {
 		return errors.New("channel: 多密钥调度模式不合法")
 	}
@@ -1015,7 +1092,7 @@ func (r Req) validateWith(gdb *gorm.DB, isCreate bool) error {
 	if r.Weight < 0 || r.Priority < 1 || r.RPMLimit < 0 || r.MaxConcurrency < 0 {
 		return errors.New("channel: 数值字段不合法（权重≥0、优先级≥1、上限≥0）")
 	}
-	if isCreate && len(r.Keys) == 0 {
+	if isCreate && len(r.Keys) == 0 && !r.allowEmptyKeys {
 		return errors.New("channel: 新建渠道至少填 1 个密钥")
 	}
 	// 声明式配置必须在保存期校验完：留到运行期会被记成渠道失败（可能自动熔断），
@@ -1046,6 +1123,96 @@ func (r Req) validateWith(gdb *gorm.DB, isCreate bool) error {
 		}
 	}
 	return nil
+}
+
+// validateWebsite 校验「上游官网」这个展示用链接。
+//
+// 与 BaseURL 的校验刻意不同：
+//   - 不能走 netguard —— 它拒私网/回环，而官网可能是内网控制台；
+//   - 不要求是 origin —— 官网允许带路径（/product/ark）与查询参数；
+//   - 必须拦 javascript:/data:（scheme 白名单）与 userinfo（https://user:pass@host）。
+func validateWebsite(raw *string) error {
+	if raw == nil {
+		return nil
+	}
+	s := strings.TrimSpace(*raw)
+	if s == "" {
+		return nil
+	}
+	if len(s) > 512 {
+		return errors.New("channel: 官网链接不能超过 512 个字符")
+	}
+	u, err := url.Parse(s)
+	if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
+		return errors.New("channel: 官网链接需为 http/https 地址")
+	}
+	if u.User != nil {
+		return errors.New("channel: 官网链接不能包含用户名或密码")
+	}
+	return nil
+}
+
+// effectiveWebsite 是「这条渠道的有效官网」的唯一判定：自己配置的优先，否则回落适配器默认。
+func effectiveWebsite(c *model.Channel) string {
+	if s := strings.TrimSpace(c.Website); s != "" {
+		return s
+	}
+	return WebsiteFor(c.AdapterID, c.BaseURL)
+}
+
+// WebsiteFor 返回「渠道没有单独配置官网」时的默认官网。
+//
+// 唯一回落规则（展示、回填、出厂导出三处共用）：
+//  1. 适配器默认（adapters.Meta.Website）；
+//  2. openai 是协议适配器，官网由 base_url 的 host 决定；
+//  3. 其余返回空（前端不渲染跳转按钮）。
+func WebsiteFor(adapterID, baseURL string) string {
+	if s := adapters.WebsiteOf(adapterID); s != "" {
+		return s
+	}
+	if adapterID == "openai" {
+		switch baseHost(baseURL) {
+		case "api.deepseek.com":
+			return "https://www.deepseek.com"
+		case "api.openai.com":
+			return "https://openai.com"
+		}
+	}
+	return ""
+}
+
+// baseHost 取 Base URL 的 host（小写，不含端口/userinfo）。
+func baseHost(raw string) string {
+	u, err := url.Parse(strings.TrimSpace(raw))
+	if err != nil {
+		return ""
+	}
+	return strings.ToLower(u.Hostname())
+}
+
+// NormalizeBaseURL 把 Base URL 归一成可比较的形态：
+// scheme/host 小写、去默认端口、去尾部斜杠、丢 query/fragment。
+//
+// 用途只有「判断两条渠道是不是同一个上游」（出厂预设匹配、导出分组、回填）。
+// 不能用于出站请求：它是有损的（路径尾斜杠被去掉）。
+// 无法解析时返回 ""，调用方必须把它当成「不可匹配」而不是「空字符串匹配」。
+func NormalizeBaseURL(raw string) string {
+	u, err := url.Parse(strings.TrimSpace(raw))
+	if err != nil || u.Scheme == "" || u.Host == "" {
+		return ""
+	}
+	u.Scheme = strings.ToLower(u.Scheme)
+	host := strings.ToLower(u.Host)
+	if (u.Scheme == "http" && strings.HasSuffix(host, ":80")) ||
+		(u.Scheme == "https" && strings.HasSuffix(host, ":443")) {
+		host = host[:strings.LastIndex(host, ":")]
+	}
+	u.Host = host
+	u.Path = strings.TrimRight(u.Path, "/")
+	u.RawPath = ""
+	u.RawQuery = ""
+	u.Fragment = ""
+	return u.String()
 }
 
 // isClearingJSON 判断原始 JSON 是否表示「清空」（null 或空对象）。
@@ -1108,10 +1275,14 @@ func normalizeAdapterOptions(raw json.RawMessage, adapterID string) (model.JSON,
 
 // boundModelsByChannel 按渠道 ID 批量取**全部绑定**（含停用；只查当前页，避免全表聚合）。
 //
+// gdb 必须由调用方传入而不是内部用 db.DB：本函数被 UpdateTx/SetStatusTx 在**事务内**
+// 调用，走全局连接会读到事务外的旧值（表现为"保存成功但响应里的绑定是上一版"），
+// 也会让不依赖全局 db 的单测直接 nil panic。
+//
 // 为什么不再过滤 enabled：删除渠道的拦截判据是「任意绑定（含停用）」，
 // 只给启用绑定会让前端算出「0 个模型」却删不掉（后端 409），
 // 且左栏「N 个模型」与右栏列表（含停用）口径不一致。启用数是前端从 Enabled 数的。
-func boundModelsByChannel(channelIDs []uint64, base string) map[uint64][]BoundModel {
+func boundModelsByChannel(gdb *gorm.DB, channelIDs []uint64, base string) map[uint64][]BoundModel {
 	var rows []struct {
 		ChannelID     uint64
 		ModelID       string
@@ -1123,7 +1294,7 @@ func boundModelsByChannel(channelIDs []uint64, base string) map[uint64][]BoundMo
 	if len(channelIDs) == 0 {
 		return out
 	}
-	err := db.DB.Model(&model.ModelBinding{}).
+	err := gdb.Model(&model.ModelBinding{}).
 		Select("model_bindings.channel_id, model_bindings.model_id, model_bindings.upstream_model, model_bindings.weight, model_bindings.enabled").
 		Where("model_bindings.channel_id IN ?", channelIDs).
 		Order("model_bindings.channel_id ASC, model_bindings.model_id ASC").
@@ -1233,10 +1404,12 @@ func Defaults() Req {
 // 用值类型做不到这件事：`rpm_limit: 0` 是合法的"不限流"，与"没提这个字段"
 // 必须能区分，否则要么改不了限流、要么每次保存都被重置。
 type Patch struct {
-	Name         *string
-	Icon         *string
-	AdapterID    *string
-	BaseURL      *string
+	Name      *string
+	Icon      *string
+	AdapterID *string
+	BaseURL   *string
+	// Website：nil = 不改；显式 "" = 清空（回到适配器默认官网）。
+	Website      *string
 	MultiKeyMode *string
 	Groups       *[]string
 	// Keys 只为"显式拒绝"而保留：`Merge` 见到它就报错，指向密钥池接口。
@@ -1270,6 +1443,9 @@ func (p Patch) Merge(cur *model.Channel) (Req, error) {
 	// 历史事故同一形态。复制后 req 始终是完整快照，语义不依赖下游实现。
 	curIcon := cur.Icon
 	req.Icon = &curIcon
+	// 官网同理：先复制库内现值，保证 req 始终是完整快照（不依赖 UpdateTx 的非 nil 判断）。
+	curWebsite := cur.Website
+	req.Website = &curWebsite
 	req.AdapterOptions = json.RawMessage(cur.AdapterOptions)
 	if len(cur.Groups) > 0 {
 		var g []string
@@ -1288,6 +1464,9 @@ func (p Patch) Merge(cur *model.Channel) (Req, error) {
 	}
 	if p.BaseURL != nil {
 		req.BaseURL = *p.BaseURL
+	}
+	if p.Website != nil {
+		req.Website = p.Website
 	}
 	if p.MultiKeyMode != nil {
 		req.MultiKeyMode = *p.MultiKeyMode

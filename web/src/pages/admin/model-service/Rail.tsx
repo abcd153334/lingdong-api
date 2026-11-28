@@ -1,40 +1,35 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useLayoutEffect, useRef } from "react";
 
 import { EmptyState } from "@/components/common/EmptyState";
-import { Icon } from "@/components/common/Icon";
 import { EntityIcon } from "@/components/common/EntityIcon";
-import { Tag } from "@/components/common/StatusTag";
+import { Icon } from "@/components/common/Icon";
 import { useOverlayBehavior } from "@/components/common/useOverlayBehavior";
 import { cn } from "@/lib/utils";
 import type { ChannelItem } from "@/types";
 
-import { boundCountText, channelStatusLabel, type RailModel } from "./grouping";
+import { ChannelDrill, ChannelFlyout } from "./ChannelFlyout";
+import type { RailModel } from "./grouping";
+import { adapterInView, ORPHANS, type FlyoutOpen } from "./state";
 
 /**
- * 左栏：适配器 → 渠道的级联列表。
+ * 左栏：**只有适配器**（200px 的卡片列表）。
  *
- * 视觉规格对标全局侧栏 `.a-side .nav-row`（40px / 13.5px / 圆角 10 / hover 与选中
- * 只有一种色块语言），几何算死在 `model-service.css` 的文件头：
- * 适配器与渠道的图标都落在 x=44、文字都落在 x=70 —— 两级对齐是「级联」与
- * 「两段互不相关的列表」的唯一区别。
+ * 与改造前的级联列表相比，这里少了两件事，而它们正是"看不懂"的来源：
+ *  - 不再把渠道摊在栏里：两级用同一套 40px 行语言，父子只能靠缩进 22px 区分，
+ *    而 200px 下缩进根本不够看；
+ *  - 不再有"展开/折叠"：点卡片是**打开二级面板**，不是把下面的行撑开 ——
+ *    前者是导航，后者是树，导航比树少一层心智负担。
  *
- * 四条结构决定（都为了避免「看起来能用、点起来错」）：
- *  1. **不是 `role="tree"`**：treeitem 要求"一个可聚焦元素代表一行"，而适配器行要
- *     额外一个「新建渠道」按钮。用 `aria-expanded` 分组按钮 + 组内按钮单选，
- *     Tab 顺序天然正确，读屏也能念出"已展开/已折叠"。
- *  2. 组头与行尾「+」是**兄弟 button**（不嵌套、不用 stopPropagation）：嵌套按钮
- *     会被浏览器重排 DOM，`getByRole` 的层级关系随之变化。
- *  3. 「+」**常驻且始终可用**：不按展开态卸载（行宽会跳 26px、chevron 位移），
- *     也不用 `visibility:hidden` 冒充禁用（键盘仍能 Tab 进去）。
- *     展开态末尾另有虚线槽，两个入口一个在顶一个在底，长列表里都够得着。
- *  4. 折叠组**条件渲染**（不在 DOM）：100+ 渠道时只有当前那一组进 DOM，
- *     Tab 序与读屏都不会滚过几百个不可见按钮。`aria-controls` 随之只在展开时声明
- *     （指向不存在的节点比不声明更糟）。
+ * 三条结构约束：
+ *  1. **「全部模型」在滚动容器之外**：它是默认视图的入口，适配器接口挂了也必须点得动。
+ *  2. 卡片是**两行 grid**：行 1 = 图标 + 名称（ellipsis + title）+ `›`，行 2 = 渠道数 +
+ *     内置/已停用。200px 下名称只有约 8 个汉字，任何徽标挤进行 1 都会把名字吃掉。
+ *  3. 计数与「内置」对读屏隐藏，`aria-label` 单独给全名 + 条数 —— 否则读屏会念成
+ *     "OpenAI 2 条渠道 · 内置 2"，而视觉上这些字是辅助信息。
  */
 export function Rail({
   model,
-  openId,
-  focusId,
+  open,
   activeChannel,
   loading,
   error,
@@ -43,42 +38,143 @@ export function Rail({
   drawerOpen,
   onCloseDrawer,
   onToggleAdapter,
+  onToggleOrphans,
+  onShowAll,
   onSelectChannel,
   onCreateChannel,
   onCreateAdapter,
+  onDrillBack,
+  onRestorePresets,
 }: {
   model: RailModel;
-  /** 当前展开的组（"" = 全部折叠） */
-  openId: string;
-  /** 含当前选中渠道的组：该组被收起时组头转主色，提示「右栏还在看它」 */
-  focusId: string;
-  /** 当前选中的渠道 id；0 = 未选中 */
-  activeChannel: number;
+  /** 浮层开在哪（抽屉形态下复用为"钻取到哪个适配器"） */
+  open: FlyoutOpen;
+  activeChannel: ChannelItem | null;
   loading: boolean;
   error: unknown;
   onRetry: () => void;
-  /** 是否处于 ≤899 的抽屉形态（由页面判定一次，组件内不读 matchMedia） */
+  /** ≤899 抽屉形态（页面判定一次，组件内不读 matchMedia） */
   drawer: boolean;
   drawerOpen: boolean;
   onCloseDrawer: () => void;
-  onToggleAdapter: (adapterId: string) => void;
+  /** 点适配器卡片：带上卡片节点，浮层用它做纵向锚点 */
+  onToggleAdapter: (adapterId: string, card: HTMLElement | null) => void;
+  onToggleOrphans: (card: HTMLElement | null) => void;
+  onShowAll: () => void;
   onSelectChannel: (ch: ChannelItem) => void;
   onCreateChannel: (adapterId: string) => void;
   onCreateAdapter: () => void;
+  /** 抽屉钻取返回适配器列表 */
+  onDrillBack: () => void;
+  /** 打开「恢复出厂」（只在存在内置行时渲染入口，见 hasBuiltin） */
+  onRestorePresets: () => void;
 }) {
   const ref = useRef<HTMLElement | null>(null);
   const listRef = useRef<HTMLDivElement | null>(null);
-  // 抽屉是页内弹层：Esc / 焦点环 / 滚动锁 / 关闭后焦点归还全部复用同一实现。
+  /** 被点的那张卡：浮层的纵向锚点 + Esc 后的焦点落点（`<aside>` 不可聚焦） */
+  const anchorCard = useRef<HTMLElement | null>(null);
   useOverlayBehavior(drawer && drawerOpen, onCloseDrawer, ref);
 
-  // 选中项滚进可视区。依赖必须带 `model`：新建渠道时先写入 pending 对象、
-  // 列表刷新后才换成真实行，两者 id 相同 —— 只依赖 id 不会重跑，新渠道就滚不到。
+  // 兜底：浮层由非点击路径打开（例如以后加深链）时，也能找到锚点卡片。
+  useLayoutEffect(() => {
+    if (!open) {
+      anchorCard.current = null;
+      return;
+    }
+    const want = anchorCard.current?.dataset.adapter ?? anchorCard.current?.dataset.orphan;
+    const id = open === ORPHANS ? "1" : open;
+    if (want !== id) {
+      anchorCard.current =
+        listRef.current?.querySelector<HTMLElement>(
+          open === ORPHANS ? "[data-orphan]" : `[data-adapter="${open}"]`,
+        ) ?? null;
+    }
+  }, [open]);
+
+  // 钻取时把当前渠道滚进视野：抽屉只有 260px 高，渠道多的时候选中项常在屏外。
   useEffect(() => {
-    if (!activeChannel) return;
+    if (!drawer || !drawerOpen || !open) return;
     listRef.current
-      ?.querySelector(`[data-channel="${activeChannel}"]`)
+      ?.querySelector(`[data-channel="${activeChannel?.id ?? 0}"]`)
       ?.scrollIntoView({ block: "nearest" });
-  }, [activeChannel, openId, model]);
+  }, [drawer, drawerOpen, open, activeChannel?.id]);
+
+  const inView = adapterInView(activeChannel);
+  const drilledGroup = open && open !== ORPHANS ? model.groups.find((g) => g.id === open) : null;
+  const drilling = drawer && !!open && (open === ORPHANS || !!drilledGroup);
+
+  /**
+   * 是否存在「内置」行 —— 恢复出厂入口的唯一可见性判据。
+   *
+   * 不用一个全局开关决定：关掉内置预设的实例（`LD_BUILTIN_PRESETS=0`）本来就没有
+   * 可恢复的行，按钮留着只会点出一个 400。按数据判断比按配置判断可靠，
+   * 而且不需要多一个接口。
+   */
+  const hasBuiltin =
+    model.groups.some((g) => g.channels.some((c) => !!c.preset_group)) ||
+    model.orphans.some((c) => !!c.preset_group);
+
+  const cards = (
+    <>
+      {model.groups.map((g) => (
+        <button
+          key={g.id}
+          type="button"
+          className="ms-adp"
+          data-adapter={g.id}
+          data-open={open === g.id ? "" : undefined}
+          aria-current={g.id === inView ? "true" : undefined}
+          aria-label={`${g.label}，${g.channels.length} 条渠道`}
+          title={g.label}
+          onClick={(e) => {
+            anchorCard.current = e.currentTarget;
+            onToggleAdapter(g.id, e.currentTarget);
+          }}
+        >
+          <span className="ms-adp__ico">
+            <EntityIcon size="xs" url={g.iconUrl} name={g.label} />
+          </span>
+          <span className="ms-adp__name">{g.label}</span>
+          <Icon name="chevronRight" size={14} className="ms-adp__chev" />
+          <span className="ms-adp__meta" aria-hidden="true">
+            <span>{g.channels.length} 条渠道</span>
+            <span>·</span>
+            {g.disabled ? (
+              <span className="is-off">已停用</span>
+            ) : (
+              <span>{g.builtin ? "内置" : "自建"}</span>
+            )}
+          </span>
+        </button>
+      ))}
+
+      {model.orphans.length > 0 ? (
+        <button
+          type="button"
+          className="ms-adp ms-adp--orphan"
+          data-orphan="1"
+          data-open={open === ORPHANS ? "" : undefined}
+          aria-label={`未登记适配器，${model.orphans.length} 条渠道`}
+          title="未登记适配器"
+          onClick={(e) => {
+            anchorCard.current = e.currentTarget;
+            onToggleOrphans(e.currentTarget);
+          }}
+        >
+          <span className="ms-adp__ico ms-adp__ico--warn">
+            <Icon name="alert" size={15} />
+          </span>
+          <span className="ms-adp__name">未登记适配器</span>
+          <Icon name="chevronRight" size={14} className="ms-adp__chev" />
+          <span className="ms-adp__meta" aria-hidden="true">
+            <span>{model.orphans.length} 条渠道</span>
+            <span>·</span>
+            <span className="is-off">已失效</span>
+          </span>
+        </button>
+      ) : null}
+    </>
+  );
 
   return (
     <>
@@ -89,13 +185,12 @@ export function Rail({
       <aside
         ref={ref}
         className="ms-rail"
-        aria-label="适配器与渠道"
+        aria-label="适配器"
         // 布尔，不能写字符串：`inert="false"` 是真值，整栏会点不动。
         inert={drawer && !drawerOpen ? true : undefined}
         role={drawer && drawerOpen ? "dialog" : undefined}
         aria-modal={drawer && drawerOpen ? true : undefined}
       >
-        {/* 抽屉形态才需要标题与关闭入口：焦点陷阱里必须有一条可点的退路 */}
         {drawer ? (
           <div className="ms-rail__head">
             <span className="ms-rail__title">适配器</span>
@@ -110,6 +205,23 @@ export function Rail({
           </div>
         ) : null}
 
+        {/* 入口固定在顶部、不随列表滚动：它是默认视图，任何时候都该在同一个位置 */}
+        <div className="ms-rail__top">
+          <button
+            type="button"
+            className="ms-all"
+            aria-label="全部模型"
+            aria-current={activeChannel ? undefined : "true"}
+            onClick={onShowAll}
+          >
+            <Icon name="grid" size={16} />
+            <span>全部模型</span>
+          </button>
+          {/* 钻取时不再画「适配器」小标题：下面那行本身就是「← 适配器 <名字>」，
+              两处并排会让"适配器"这个词在同一屏出现三次 */}
+          {drilling ? null : <div className="ms-rail__label">适配器</div>}
+        </div>
+
         <div className="ms-rail__list" ref={listRef}>
           {loading ? (
             <EmptyState variant="loading" title="加载中…" />
@@ -123,133 +235,65 @@ export function Rail({
                 </button>
               }
             />
+          ) : drilling ? (
+            <ChannelDrill
+              label={open === ORPHANS ? "未登记适配器" : (drilledGroup?.label ?? "")}
+              channels={open === ORPHANS ? model.orphans : (drilledGroup?.channels ?? [])}
+              activeId={activeChannel?.id ?? 0}
+              orphans={open === ORPHANS}
+              onBack={onDrillBack}
+              onSelect={onSelectChannel}
+            />
           ) : model.groups.length === 0 && model.orphans.length === 0 ? (
             <EmptyState title="没有可用的适配器" />
           ) : (
-            <>
-              {model.groups.map((g, i) => {
-                const open = g.id === openId;
-                const chsId = `ms-chs-${i}`;
-                return (
-                  <div key={g.id} className="ms-grp" data-adapter={g.id}>
-                    <div className="ms-grp__head">
-                      <button
-                        type="button"
-                        className={cn(
-                          "ms-gh",
-                          open && "is-open",
-                          // 收起时仍标出「选中的渠道在这一组里」，与侧栏 `.nav-group.on` 同一条规则
-                          !open && g.id === focusId && "is-focus",
-                        )}
-                        aria-expanded={open}
-                        aria-controls={open ? chsId : undefined}
-                        onClick={() => onToggleAdapter(g.id)}
-                      >
-                        <Icon name="chevronDown" size={14} className="ms-gh__caret" />
-                        <EntityIcon size="xs" url={g.iconUrl} name={g.label} />
-                        <span className="ms-gh__label">{g.label}</span>
-                        {g.disabled ? (
-                          <span className="ms-gh__tag is-off">已停用</span>
-                        ) : g.builtin ? (
-                          <span className="ms-gh__tag">内置</span>
-                        ) : null}
-                        {/* 计数不进可访问名：读屏应该念实体名，不是「OpenAI 内置 2」 */}
-                        <span className="ms-gh__count" aria-hidden="true">
-                          {g.channels.length}
-                        </span>
-                      </button>
-                      <button
-                        type="button"
-                        className="ms-gh__add"
-                        // 名称里带适配器名：折叠态下同时有多行各有一个「+」，
-                        // 只叫"新建渠道"会让读屏与 e2e 都无法区分是哪一行。
-                        aria-label={`在「${g.label}」下新建渠道`}
-                        onClick={() => onCreateChannel(g.id)}
-                      >
-                        <Icon name="plus" size={14} />
-                      </button>
-                    </div>
-
-                    {open ? (
-                      <div className="ms-chs" id={chsId}>
-                        {g.channels.map((ch) => (
-                          <button
-                            key={ch.id}
-                            type="button"
-                            className="ms-ch"
-                            data-channel={ch.id}
-                            aria-current={ch.id === activeChannel ? "true" : undefined}
-                            onClick={() => onSelectChannel(ch)}
-                          >
-                            <EntityIcon size="xs" url={ch.icon_url} name={ch.name} />
-                            <span className="ms-ch__name">{ch.name}</span>
-                            {ch.status === 1 ? (
-                              <span className="ms-ch__meta">{boundCountText(ch)}</span>
-                            ) : (
-                              <Tag tone="warning">{channelStatusLabel(ch.status)}</Tag>
-                            )}
-                          </button>
-                        ))}
-                        {/* 固定槽：永远在最后一项，虚线边框表示"这里还能加一个"。
-                            aria-label 必须逐字是「新建渠道」—— 全页唯一，e2e 用 exact 定位。 */}
-                        <button
-                          type="button"
-                          className="ms-add-dashed"
-                          aria-label="新建渠道"
-                          onClick={() => onCreateChannel(g.id)}
-                        >
-                          <Icon name="plus" size={13} />
-                          <span>新建渠道</span>
-                        </button>
-                      </div>
-                    ) : null}
-                  </div>
-                );
-              })}
-
-              {model.orphans.length > 0 ? (
-                <div className="ms-grp ms-grp--orphan">
-                  <div className="ms-grp__head">
-                    {/* 不可点、不可折叠：这里没有可展开的适配器，只有一个需要处理的桶 */}
-                    <div className="ms-gh ms-gh--static">
-                      <Icon name="alert" size={18} className="ms-gh__warn" />
-                      <span className="ms-gh__label">未登记适配器</span>
-                      <span className="ms-gh__count" aria-hidden="true">
-                        {model.orphans.length}
-                      </span>
-                    </div>
-                  </div>
-                  <div className="ms-chs">
-                    {model.orphans.map((ch) => (
-                      <button
-                        key={ch.id}
-                        type="button"
-                        className="ms-ch"
-                        data-channel={ch.id}
-                        aria-current={ch.id === activeChannel ? "true" : undefined}
-                        onClick={() => onSelectChannel(ch)}
-                      >
-                        <EntityIcon size="xs" url={ch.icon_url} name={ch.name} />
-                        <span className="ms-ch__name">{ch.name}</span>
-                        <span className="ms-ch__meta is-off">适配器失效</span>
-                      </button>
-                    ))}
-                  </div>
-                  {/* 只写左栏做得到的事：「点开后可改绑」是渠道条上的操作，不在这里承诺 */}
-                  <p className="ms-grp__note">适配器已失效，调用会失败。</p>
-                </div>
-              ) : null}
-            </>
+            <div className="ms-rail__cards">{cards}</div>
           )}
         </div>
 
         <div className="ms-rail__foot">
-          <button type="button" className="ms-new" onClick={onCreateAdapter}>
-            <Icon name="plus" size={15} />
-            <span>新建适配器</span>
-          </button>
+          {drilling ? (
+            <button
+              type="button"
+              className="btn btn-primary ms-rail__new"
+              // 孤儿桶没有可用的适配器，建渠道必然失败
+              disabled={open === ORPHANS}
+              onClick={() => onCreateChannel(open === ORPHANS ? "" : open)}
+            >
+              新建渠道
+            </button>
+          ) : (
+            <button type="button" className="ms-new" onClick={onCreateAdapter}>
+              <Icon name="plus" size={15} />
+              <span>新建适配器</span>
+            </button>
+          )}
+          {/* 维护类动作，不是"在这里新建"：做成弱按钮，与上面那个主按钮分组 */}
+          {hasBuiltin ? (
+            <button type="button" className="ms-reset" onClick={onRestorePresets}>
+              恢复出厂…
+            </button>
+          ) : null}
         </div>
       </aside>
+
+      {/* 浮层只在桌面渲染：≤899 走抽屉钻取，两层 Sheet 会互相抢手势与返回路径 */}
+      {!drawer ? (
+        <ChannelFlyout
+          open={!!open}
+          // 用适配器 id 而不是显示名做定位键：同名适配器之间切换也必须重新定位
+          adapterKey={open === ORPHANS ? ORPHANS : open}
+          label={open === ORPHANS ? "未登记适配器" : (drilledGroup?.label ?? "")}
+          channels={open === ORPHANS ? model.orphans : (drilledGroup?.channels ?? [])}
+          activeId={activeChannel?.id ?? 0}
+          orphans={open === ORPHANS}
+          onClose={onDrillBack}
+          onSelect={onSelectChannel}
+          onCreate={() => onCreateChannel(open === ORPHANS ? "" : open)}
+          anchorRef={ref}
+          alignRef={anchorCard}
+        />
+      ) : null}
     </>
   );
 }

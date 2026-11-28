@@ -1,0 +1,891 @@
+[
+  {
+    "marker_key": "builtin_presets.duomiapi",
+    "version": 1,
+    "vendor": {
+      "id": "duomi",
+      "name": "多米API",
+      "color": "#0EA5E9",
+      "icon": "",
+      "priority": 0,
+      "sort": 100,
+      "builtin": true
+    },
+    "vendors": [
+      {
+        "id": "duomi",
+        "name": "多米API",
+        "color": "#0EA5E9",
+        "icon": "",
+        "priority": 0,
+        "sort": 100,
+        "builtin": true
+      },
+      {
+        "id": "google",
+        "name": "Google",
+        "color": "#4285F4",
+        "icon": "",
+        "priority": 0,
+        "sort": 3,
+        "builtin": true
+      },
+      {
+        "id": "kling",
+        "name": "可灵 AI",
+        "color": "#F59E0B",
+        "icon": "",
+        "priority": 0,
+        "sort": 11,
+        "builtin": true
+      },
+      {
+        "id": "openai",
+        "name": "OpenAI",
+        "color": "#10A37F",
+        "icon": "builtin:openai-gpt",
+        "priority": 0,
+        "sort": 1,
+        "builtin": true
+      },
+      {
+        "id": "suno",
+        "name": "Suno",
+        "color": "#E11D48",
+        "icon": "",
+        "priority": 0,
+        "sort": 14,
+        "builtin": true
+      },
+      {
+        "id": "vg_908be1ac",
+        "name": "火山方舟",
+        "color": "#10B981",
+        "icon": "",
+        "priority": 0,
+        "sort": 100,
+        "builtin": false
+      }
+    ],
+    "channel": {
+      "adapter_id": "duomiapi",
+      "name": "多米API",
+      "base_url": "https://duomiapi.com",
+      "website": "https://duomiapi.com",
+      "icon": "builtin:duomi",
+      "adapter_options": {
+        "metadata_allow": [
+          "generate_audio",
+          "watermark"
+        ],
+        "model_overrides": {
+          "kling-v3": {
+            "mode": "std",
+            "protocol": "kling",
+            "upstream_model": "kling-v3"
+          },
+          "chirp-hawk": {
+            "protocol": "suno.music",
+            "upstream_model": "chirp-hawk"
+          },
+          "gemini-nano-banana-2.1": {
+            "protocol": "nano",
+            "upstream_model": "gemini-nano-banana-2.1"
+          },
+          "doubao-seedance-2-0-260128": {
+            "protocol": "seedance",
+            "upstream_model": "doubao-seedance-2-0-260128"
+          },
+          "gemini-3.1-flash-image-preview": {
+            "protocol": "nano",
+            "upstream_model": "gemini-3.1-flash-image-preview"
+          },
+          "doubao-seedance-2-0-fast-260128": {
+            "protocol": "seedance",
+            "upstream_model": "doubao-seedance-2-0-fast-260128"
+          },
+          "gemini-3.1-flash-lite-image-preview": {
+            "protocol": "nano",
+            "upstream_model": "gemini-3.1-flash-lite-image-preview"
+          }
+        }
+      },
+      "weight": 10,
+      "priority": 1,
+      "max_concurrency": 0,
+      "rpm_limit": 0
+    },
+    "models": [
+      {
+        "id": "chirp-hawk",
+        "display_name": "SUNO 音乐（chirp-hawk）",
+        "description": "",
+        "vendor": "suno",
+        "icon": "builtin:suno",
+        "modality": "music",
+        "billing_mode": "spec",
+        "prices": {},
+        "spec": {
+          "kind": "per_clip",
+          "max_n": 2,
+          "per_clip_price": 300000
+        },
+        "endpoints": [
+          "audio/music/generations"
+        ],
+        "caps": [
+          "music"
+        ],
+        "context_window": 0,
+        "max_output_tokens": 0,
+        "binding_weight": 10,
+        "binding_priority": 1
+      },
+      {
+        "id": "doubao-seedance-2-0-260128",
+        "display_name": "Seedance 2.0",
+        "description": "",
+        "vendor": "vg_908be1ac",
+        "icon": "",
+        "modality": "video",
+        "billing_mode": "spec",
+        "prices": {},
+        "spec": {
+          "kind": "per_video",
+          "second_price": {
+            "1080p": 2500000,
+            "480p": 500000,
+            "720p": 960000
+          },
+          "max_seconds": 15,
+          "ref_image_price": 300000,
+          "ref_image_free": 5,
+          "ref_video_second_price": {
+            "1080p": 2500000,
+            "480p": 600000,
+            "720p": 900000
+          }
+        },
+        "endpoints": [
+          "video/generations"
+        ],
+        "caps": [
+          "t2v"
+        ],
+        "context_window": 0,
+        "max_output_tokens": 0,
+        "binding_weight": 10,
+        "binding_priority": 1
+      },
+      {
+        "id": "doubao-seedance-2-0-fast-260128",
+        "display_name": "Seedance 2.0 Fast",
+        "description": "",
+        "vendor": "vg_908be1ac",
+        "icon": "",
+        "modality": "video",
+        "billing_mode": "spec",
+        "prices": {},
+        "spec": {
+          "kind": "per_video",
+          "second_price": {
+            "480p": 500000,
+            "720p": 900000
+          },
+          "max_seconds": 15,
+          "ref_image_price": 200000,
+          "ref_image_free": 5,
+          "ref_video_second_price": {
+            "480p": 500000,
+            "720p": 900000
+          }
+        },
+        "endpoints": [
+          "video/generations"
+        ],
+        "caps": [
+          "t2v"
+        ],
+        "context_window": 0,
+        "max_output_tokens": 0,
+        "binding_weight": 10,
+        "binding_priority": 1
+      },
+      {
+        "id": "gemini-3.1-flash-image-preview",
+        "display_name": "Gemini 3.1 Flash Image（Nano Banana 2）",
+        "description": "",
+        "vendor": "google",
+        "icon": "",
+        "modality": "image",
+        "billing_mode": "spec",
+        "prices": {},
+        "spec": {
+          "kind": "per_image",
+          "tier_price": {
+            "1K": 60000,
+            "2K": 80000
+          },
+          "max_n": 1,
+          "resolution_fixed": "1K"
+        },
+        "endpoints": [
+          "images/generations"
+        ],
+        "caps": [
+          "t2i"
+        ],
+        "context_window": 0,
+        "max_output_tokens": 0,
+        "binding_weight": 10,
+        "binding_priority": 1
+      },
+      {
+        "id": "gemini-3.1-flash-lite-image-preview",
+        "display_name": "Gemini 3.1 Flash Lite Image",
+        "description": "",
+        "vendor": "google",
+        "icon": "",
+        "modality": "image",
+        "billing_mode": "spec",
+        "prices": {},
+        "spec": {
+          "kind": "per_image",
+          "tier_price": {
+            "1K": 60000,
+            "2K": 60000,
+            "4K": 80000
+          },
+          "max_n": 1,
+          "resolution_fixed": "2K"
+        },
+        "endpoints": [
+          "images/generations"
+        ],
+        "caps": [
+          "t2i"
+        ],
+        "context_window": 0,
+        "max_output_tokens": 0,
+        "binding_weight": 10,
+        "binding_priority": 1
+      },
+      {
+        "id": "gemini-nano-banana-2.1",
+        "display_name": "Gemini Nano Banana 2.1",
+        "description": "",
+        "vendor": "google",
+        "icon": "",
+        "modality": "image",
+        "billing_mode": "spec",
+        "prices": {},
+        "spec": {
+          "kind": "per_image",
+          "tier_price": {
+            "1K": 60000,
+            "2K": 70000
+          },
+          "max_n": 1,
+          "resolution_fixed": "2K"
+        },
+        "endpoints": [
+          "images/generations"
+        ],
+        "caps": [
+          "t2i"
+        ],
+        "context_window": 0,
+        "max_output_tokens": 0,
+        "binding_weight": 10,
+        "binding_priority": 1
+      },
+      {
+        "id": "gpt-image-2",
+        "display_name": "GPT Image 2",
+        "description": "",
+        "vendor": "openai",
+        "icon": "",
+        "modality": "image",
+        "billing_mode": "spec",
+        "prices": {},
+        "spec": {
+          "kind": "per_image",
+          "tier_price": {
+            "1K": 60000,
+            "2K": 70000,
+            "4K": 80000
+          },
+          "max_n": 1,
+          "resolution_fixed": "2K"
+        },
+        "endpoints": [
+          "images/generations"
+        ],
+        "caps": [
+          "t2i"
+        ],
+        "context_window": 0,
+        "max_output_tokens": 0,
+        "binding_weight": 10,
+        "binding_priority": 1
+      },
+      {
+        "id": "gpt-image-2.5-flare",
+        "display_name": "gpt-image-2.5-flare",
+        "description": "",
+        "vendor": "openai",
+        "icon": "",
+        "modality": "image",
+        "billing_mode": "spec",
+        "prices": {},
+        "spec": {
+          "kind": "per_image",
+          "tier_price": {
+            "1K": 70000,
+            "2K": 80000,
+            "4K": 100000
+          },
+          "max_n": 1,
+          "resolution_fixed": "2K"
+        },
+        "endpoints": [
+          "images/generations"
+        ],
+        "caps": [
+          "t2i"
+        ],
+        "tags": [
+          {
+            "label": "推荐",
+            "color": "pink"
+          }
+        ],
+        "context_window": 0,
+        "max_output_tokens": 0,
+        "binding_weight": 3,
+        "binding_priority": 1
+      },
+      {
+        "id": "gpt-image-2.5-sunburst",
+        "display_name": "GPT Image 2.5 Sunburst",
+        "description": "",
+        "vendor": "openai",
+        "icon": "",
+        "modality": "image",
+        "billing_mode": "spec",
+        "prices": {},
+        "spec": {
+          "kind": "per_image",
+          "tier_price": {
+            "1K": 80000,
+            "2K": 90000,
+            "4K": 110000
+          },
+          "max_n": 1,
+          "resolution_fixed": "2K"
+        },
+        "endpoints": [
+          "images/generations"
+        ],
+        "caps": [
+          "t2i"
+        ],
+        "context_window": 0,
+        "max_output_tokens": 0,
+        "binding_weight": 10,
+        "binding_priority": 1
+      },
+      {
+        "id": "gpt-image-2.6-flare",
+        "display_name": "gpt-image-2.6-flare",
+        "description": "",
+        "vendor": "openai",
+        "icon": "",
+        "modality": "image",
+        "billing_mode": "spec",
+        "prices": {},
+        "spec": {
+          "kind": "per_image",
+          "tier_price": {
+            "1K": 70000,
+            "2K": 80000,
+            "4K": 100000
+          },
+          "max_n": 1,
+          "resolution_fixed": "2K"
+        },
+        "endpoints": [
+          "images/generations"
+        ],
+        "caps": [
+          "t2i"
+        ],
+        "context_window": 0,
+        "max_output_tokens": 0,
+        "binding_weight": 1,
+        "binding_priority": 1
+      },
+      {
+        "id": "gpt-image-2.6-sunburst",
+        "display_name": "gpt-image-2.6-sunburst",
+        "description": "",
+        "vendor": "openai",
+        "icon": "",
+        "modality": "image",
+        "billing_mode": "spec",
+        "prices": {},
+        "spec": {
+          "kind": "per_image",
+          "tier_price": {
+            "1K": 90000,
+            "2K": 100000,
+            "4K": 120000
+          },
+          "max_n": 1,
+          "resolution_fixed": "2K"
+        },
+        "endpoints": [
+          "images/generations"
+        ],
+        "caps": [
+          "t2i"
+        ],
+        "context_window": 0,
+        "max_output_tokens": 0,
+        "binding_weight": 1,
+        "binding_priority": 1
+      },
+      {
+        "id": "kling-v3",
+        "display_name": "可灵 3.0（std / 720p）",
+        "description": "",
+        "vendor": "kling",
+        "icon": "",
+        "modality": "video",
+        "billing_mode": "spec",
+        "prices": {},
+        "spec": {
+          "kind": "per_video",
+          "second_price": {
+            "1080p": 1000000,
+            "720p": 800000
+          },
+          "max_seconds": 15,
+          "resolution_fixed": "720p"
+        },
+        "endpoints": [
+          "video/generations"
+        ],
+        "caps": [
+          "t2v"
+        ],
+        "context_window": 0,
+        "max_output_tokens": 0,
+        "binding_weight": 10,
+        "binding_priority": 1
+      },
+      {
+        "id": "kling-v3-omni",
+        "display_name": "可灵 3.0 Omni",
+        "description": "",
+        "vendor": "kling",
+        "icon": "",
+        "modality": "video",
+        "billing_mode": "spec",
+        "prices": {},
+        "spec": {
+          "kind": "per_video",
+          "second_price": {
+            "1080p": 900000,
+            "720p": 700000
+          },
+          "max_seconds": 15,
+          "resolution_fixed": "720p"
+        },
+        "endpoints": [
+          "video/generations"
+        ],
+        "caps": [
+          "t2v"
+        ],
+        "context_window": 0,
+        "max_output_tokens": 0,
+        "binding_weight": 10,
+        "binding_priority": 1
+      },
+      {
+        "id": "muse-video",
+        "display_name": "Muse Video",
+        "description": "多米原生视频模型：必填 prompt 与 aspect_ratio（16:9 / 9:16）；参考图用 input_reference（type=image）传 1–8 张，顶层 image_urls 会被拒绝；duration 可选（常用 10 / 20 / 30 秒），平台按 720p 秒价计费、单条最长 30 秒；不传 duration 时按 30 秒计费（上游默认时长不退差额），建议显式传值；该模型没有分辨率参数，请求里的 resolution / size 不会下发。",
+        "vendor": "duomi",
+        "icon": "",
+        "modality": "video",
+        "billing_mode": "spec",
+        "prices": {},
+        "spec": {
+          "kind": "per_video",
+          "second_price": {
+            "720p": 50000
+          },
+          "max_seconds": 30,
+          "resolution_fixed": "720p"
+        },
+        "endpoints": [
+          "video/generations"
+        ],
+        "caps": [
+          "i2v"
+        ],
+        "context_window": 0,
+        "max_output_tokens": 0,
+        "binding_weight": 10,
+        "binding_priority": 1
+      },
+      {
+        "id": "suno-lyrics",
+        "display_name": "SUNO 歌词",
+        "description": "AI 写歌词：产物为纯文本，通过 /v1/tasks/{id}/contents/0 下载。prompt ≤ 2000 字符。",
+        "vendor": "duomi",
+        "icon": "",
+        "modality": "music",
+        "billing_mode": "spec",
+        "prices": {},
+        "spec": {
+          "kind": "per_clip",
+          "max_n": 1,
+          "per_clip_price": 5000
+        },
+        "endpoints": [
+          "audio/lyrics"
+        ],
+        "caps": [
+          "lyrics"
+        ],
+        "context_window": 0,
+        "max_output_tokens": 0,
+        "binding_upstream": "chirp-hawk",
+        "binding_weight": 10,
+        "binding_priority": 1
+      }
+    ]
+  },
+  {
+    "marker_key": "builtin_presets.metaso",
+    "version": 1,
+    "vendor": {
+      "id": "minimax",
+      "name": "MiniMax",
+      "color": "#F23F5D",
+      "icon": "",
+      "priority": 0,
+      "sort": 9,
+      "builtin": true
+    },
+    "vendors": [
+      {
+        "id": "minimax",
+        "name": "MiniMax",
+        "color": "#F23F5D",
+        "icon": "",
+        "priority": 0,
+        "sort": 9,
+        "builtin": true
+      }
+    ],
+    "channel": {
+      "adapter_id": "metaso",
+      "name": "Metaso 标准通道",
+      "base_url": "https://metaso.cn",
+      "website": "https://metaso.cn",
+      "icon": "",
+      "adapter_options": {
+        "fast_mode": false
+      },
+      "weight": 8,
+      "priority": 1,
+      "max_concurrency": 0,
+      "rpm_limit": 0
+    },
+    "models": [
+      {
+        "id": "minimax-h3",
+        "display_name": "MiniMax H3（标准）",
+        "description": "",
+        "vendor": "minimax",
+        "icon": "",
+        "modality": "video",
+        "billing_mode": "spec",
+        "prices": {},
+        "spec": {
+          "kind": "per_video",
+          "second_price": {
+            "1080p": 150000,
+            "2k": 170000,
+            "480p": 70000,
+            "720p": 100000
+          },
+          "max_seconds": 30,
+          "long_after_seconds": 15,
+          "long_video_multiplier": 2000000,
+          "ref_image_price": 50000,
+          "ref_image_free": 5,
+          "ref_video_second_price": {
+            "1080p": 150000,
+            "2k": 170000,
+            "480p": 70000,
+            "720p": 100000
+          }
+        },
+        "endpoints": [
+          "video/generations"
+        ],
+        "caps": [
+          "t2v",
+          "i2v",
+          "ref_video",
+          "video_native"
+        ],
+        "context_window": 0,
+        "max_output_tokens": 0,
+        "binding_upstream": "MiniMax-H3",
+        "binding_weight": 10,
+        "binding_priority": 1
+      }
+    ]
+  },
+  {
+    "marker_key": "builtin_presets.metaso-2",
+    "version": 1,
+    "vendor": {
+      "id": "minimax",
+      "name": "MiniMax",
+      "color": "#F23F5D",
+      "icon": "",
+      "priority": 0,
+      "sort": 9,
+      "builtin": true
+    },
+    "vendors": [
+      {
+        "id": "minimax",
+        "name": "MiniMax",
+        "color": "#F23F5D",
+        "icon": "",
+        "priority": 0,
+        "sort": 9,
+        "builtin": true
+      }
+    ],
+    "channel": {
+      "adapter_id": "metaso",
+      "name": "Metaso 优先通道",
+      "base_url": "https://metaso.cn",
+      "website": "https://metaso.cn",
+      "icon": "",
+      "adapter_options": {
+        "fast_mode": true
+      },
+      "weight": 8,
+      "priority": 1,
+      "max_concurrency": 0,
+      "rpm_limit": 0
+    },
+    "models": [
+      {
+        "id": "minimax-h3-fast",
+        "display_name": "MiniMax H3（高速）",
+        "description": "",
+        "vendor": "minimax",
+        "icon": "",
+        "modality": "video",
+        "billing_mode": "spec",
+        "prices": {},
+        "spec": {
+          "kind": "per_video",
+          "second_price": {
+            "1080p": 300000,
+            "2k": 350000,
+            "480p": 130000,
+            "720p": 200000
+          },
+          "max_seconds": 30,
+          "long_after_seconds": 15,
+          "long_video_multiplier": 2000000,
+          "ref_image_price": 100000,
+          "ref_image_free": 5,
+          "ref_video_second_price": {
+            "1080p": 300000,
+            "2k": 350000,
+            "480p": 130000,
+            "720p": 200000
+          }
+        },
+        "endpoints": [
+          "video/generations"
+        ],
+        "caps": [
+          "t2v",
+          "i2v",
+          "ref_video",
+          "video_native"
+        ],
+        "context_window": 0,
+        "max_output_tokens": 0,
+        "binding_upstream": "MiniMax-H3",
+        "binding_weight": 10,
+        "binding_priority": 1
+      }
+    ]
+  },
+  {
+    "marker_key": "builtin_presets.autodl",
+    "version": 1,
+    "vendor": {
+      "id": "minimax",
+      "name": "MiniMax",
+      "color": "#F23F5D",
+      "icon": "",
+      "priority": 0,
+      "sort": 9,
+      "builtin": true
+    },
+    "vendors": [
+      {
+        "id": "minimax",
+        "name": "MiniMax",
+        "color": "#F23F5D",
+        "icon": "",
+        "priority": 0,
+        "sort": 9,
+        "builtin": true
+      }
+    ],
+    "channel": {
+      "adapter_id": "autodl",
+      "name": "AutoDL 官方",
+      "base_url": "https://autodl.art",
+      "website": "https://autodl.art",
+      "icon": "",
+      "weight": 5,
+      "priority": 1,
+      "max_concurrency": 0,
+      "rpm_limit": 0
+    },
+    "models": [
+      {
+        "id": "minimax-h3-flash",
+        "display_name": "MiniMax H3（ Flash）",
+        "description": "",
+        "vendor": "minimax",
+        "icon": "",
+        "modality": "video",
+        "billing_mode": "spec",
+        "prices": {},
+        "spec": {
+          "kind": "per_video",
+          "second_price": {
+            "480p": 50000,
+            "720p": 60000
+          },
+          "max_seconds": 15,
+          "ref_image_price": 0,
+          "ref_image_free": 5
+        },
+        "endpoints": [
+          "video/generations"
+        ],
+        "caps": [
+          "t2v"
+        ],
+        "context_window": 0,
+        "max_output_tokens": 0,
+        "binding_upstream": "autodl-video",
+        "binding_weight": 1,
+        "binding_priority": 1
+      }
+    ]
+  },
+  {
+    "marker_key": "builtin_presets.deepseek",
+    "version": 1,
+    "vendor": {
+      "id": "deepseek",
+      "name": "DeepSeek",
+      "color": "#4D6BFE",
+      "icon": "",
+      "priority": 0,
+      "sort": 4,
+      "builtin": true
+    },
+    "vendors": [
+      {
+        "id": "deepseek",
+        "name": "DeepSeek",
+        "color": "#4D6BFE",
+        "icon": "",
+        "priority": 0,
+        "sort": 4,
+        "builtin": true
+      }
+    ],
+    "channel": {
+      "adapter_id": "openai",
+      "name": "DeepSeek 官方",
+      "base_url": "https://api.deepseek.com",
+      "website": "https://www.deepseek.com",
+      "icon": "builtin:deepseek",
+      "weight": 10,
+      "priority": 1,
+      "max_concurrency": 0,
+      "rpm_limit": 0
+    },
+    "models": [
+      {
+        "id": "deepseek-flash",
+        "display_name": "DeepSeek V4.1 Flash",
+        "description": "",
+        "vendor": "deepseek",
+        "icon": "builtin:deepseek",
+        "modality": "chat",
+        "billing_mode": "tokens",
+        "prices": {
+          "input": 1209600,
+          "output": 10368000,
+          "cache": 86400
+        },
+        "spec": null,
+        "endpoints": [
+          "chat/completions"
+        ],
+        "caps": [],
+        "context_window": 0,
+        "max_output_tokens": 0,
+        "binding_weight": 10,
+        "binding_priority": 1
+      },
+      {
+        "id": "deepseek-v4-pro",
+        "display_name": "DeepSeek V4 Pro",
+        "description": "",
+        "vendor": "deepseek",
+        "icon": "builtin:deepseek",
+        "modality": "chat",
+        "billing_mode": "tokens",
+        "prices": {
+          "input": 6264000,
+          "output": 12528000,
+          "cache": 51991
+        },
+        "spec": null,
+        "endpoints": [
+          "chat/completions"
+        ],
+        "caps": [],
+        "context_window": 0,
+        "max_output_tokens": 0,
+        "binding_weight": 10,
+        "binding_priority": 1
+      }
+    ]
+  }
+]

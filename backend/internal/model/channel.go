@@ -27,9 +27,16 @@ type Channel struct {
 	//
 	// 渠道是运营内部概念，图标只在管理台展示（门户/文档站不出现渠道），
 	// 所以它没有"回落到供应商"的语义 —— 为空就是首字占位。
-	Icon         string `gorm:"size:255;not null;default:''"`
-	AdapterID    string `gorm:"size:64;not null"`
-	BaseURL      string `gorm:"size:255"`
+	Icon      string `gorm:"size:255;not null;default:''"`
+	AdapterID string `gorm:"size:64;not null"`
+	BaseURL   string `gorm:"size:255"`
+	// Website 是该渠道的**上游官网**（展示/跳转用，不参与任何出站请求）。
+	//
+	// 与 BaseURL 分开而不是从它推导：BaseURL 是 API 基址（常以 /api/v3 结尾），
+	// 官网是给人看的站点；同一个上游的两者不同域是常态（api.deepseek.com vs deepseek.com）。
+	// 空串 = 回落到适配器默认官网（adapters.Meta.Website），仍为空则不显示跳转按钮。
+	// 由 AutoMigrate 加列（不需要数据迁移）；存量行由 service/channel 的一次性回填补齐。
+	Website      string `gorm:"size:512;not null;default:''"`
 	Keys         JSON   `gorm:"type:jsonb"`
 	MultiKeyMode string `gorm:"size:16;not null;default:random"`
 	// KeyMeta 是密钥池的**人工属性表**（map[keyID]Meta，见 pkg/channelkeys）。
@@ -65,10 +72,15 @@ type Channel struct {
 	AdapterOptions JSON `gorm:"type:jsonb"`
 	// Version 是乐观锁版本号：**所有**写路径都要 version+1，
 	// 否则 AI 提案的 CAS（期望版本 == 当前版本）永远成立，会静默覆盖别人的改动。
-	Version   int            `gorm:"not null;default:1"`
-	CreatedAt time.Time      `gorm:"type:timestamptz"`
-	UpdatedAt time.Time      `gorm:"type:timestamptz"`
-	DeletedAt gorm.DeletedAt `gorm:"index;type:timestamptz"`
+	Version int `gorm:"not null;default:1"`
+	// PresetGroup 是「出厂预设组」标记（如 "builtin.duomi"）；"" = 非内置。
+	//
+	// 只有预设新建/精确认领的行才写：运营自建行恒空，恢复出厂只动命中标记的行。
+	// 它不是"是否可编辑"的开关 —— 内置行照样可以改名/改价/删除，标记只用于识别与恢复。
+	PresetGroup string         `gorm:"size:64;not null;default:''"`
+	CreatedAt   time.Time      `gorm:"type:timestamptz"`
+	UpdatedAt   time.Time      `gorm:"type:timestamptz"`
+	DeletedAt   gorm.DeletedAt `gorm:"index;type:timestamptz"`
 }
 
 func (Channel) TableName() string { return "channels" }

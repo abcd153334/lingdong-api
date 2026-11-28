@@ -226,7 +226,10 @@ export function BindDialog({
           {pick.isLoading ? (
             <EmptyState variant="loading" title="加载中…" />
           ) : rows.length === 0 ? (
-            <EmptyState title="没有匹配的模型" desc="换个关键词，或先新建模型。" />
+            <EmptyState
+              title="没有匹配的模型"
+              desc="换个关键词；需要新模型时，先在本渠道里用「新建模型」建一个（建完即绑定）。"
+            />
           ) : (
             <div className="bd-list">
               {rows.map((m) => {

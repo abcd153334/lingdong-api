@@ -13,10 +13,8 @@ import (
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 
-	"lingdong-api/internal/conf"
 	"lingdong-api/internal/model"
 	"lingdong-api/internal/pkg/affcfg"
-	"lingdong-api/internal/pkg/crypto"
 	"lingdong-api/internal/pkg/logger"
 	"lingdong-api/internal/pkg/money"
 	"lingdong-api/internal/pkg/uploadcfg"
@@ -24,7 +22,7 @@ import (
 
 // 初始超管口令**不再写死**。
 //
-// 历史上这里是 "123456" 的 bcrypt 摘要，且 seedAdmin 不受 LD_SEED_ENABLED 约束 ——
+// 历史上这里是 "123456" 的 bcrypt 摘要，而且没有任何开关能拦住它 ——
 // 每一个全新库（含生产）开箱即带一个口令公开的超管。现在改为：
 //   - 配了 LD_BOOTSTRAP_ADMIN_PASSWORD 就用它（运维显式选择，不强制改密，避免打断脚本）；
 //   - 没配就用内置出厂值 admin123，并置 must_change_password（首登强制改密）。
@@ -44,14 +42,18 @@ const bootstrapAdminEnv = "LD_BOOTSTRAP_ADMIN_PASSWORD"
 // 改密（例如给 CI 建静态环境）就显式设 LD_BOOTSTRAP_ADMIN_PASSWORD。
 const defaultBootstrapPassword = "admin123"
 
-// Seed 写入幂等种子数据（ON CONFLICT DO NOTHING）。
+// Seed 写入**基础设施层**的幂等种子（ON CONFLICT DO NOTHING / 空表才写）。
 //
-// 分两层执行（LD_SEED_ENABLED）：
-//   - **基础层**（无条件）：管理员账号 + system_config 默认值 + 默认接入应用 + modality_defaults 回填。
-//   - **演示/开通层**（LD_SEED_ENABLED=1 才跑，默认开）：供应商 / 模型 / 渠道 / 绑定 / 套餐。
+// 这里只放"没有它系统就跑不起来"的东西：管理员账号、system_config 默认值、
+// 默认接入应用、供应商参考数据、套餐档位、modality_defaults 回填。
 //
-// 种子价目**直接写金额（微）**，不再写倍率：模型价格是"每百万 token 多少钱"这一
-// 唯一事实，任何"倍率 × 刻度"的中间量都会让管理台回显与实际扣费分叉。
+// **渠道 / 模型 / 绑定不在这里**，它们的出厂内容由 `service/presets` 负责
+// （`LD_BUILTIN_PRESETS` 开关 + 每实例一次 + 带内置标记 + 可恢复出厂）。
+// 历史上这一层还写过一套演示上游（`sk-demo-openai-key` 的渠道 + 9 个模型 + 绑定），
+// 它有三个无法修复的问题，已整体删除：
+//   - 渠道带一把假密钥且**是启用态**，模型看起来可用、调用必然失败；
+//   - 没有任何标记区分"演示"与"运营自建"，运营要一条条手工清；
+//   - 与内置预设层重复表达同一件事（"出厂应该有哪些模型"），两份清单必然漂移。
 func Seed(gdb *gorm.DB) error {
 	if err := seedAdmin(gdb); err != nil {
 		return err
@@ -59,27 +61,20 @@ func Seed(gdb *gorm.DB) error {
 	if err := seedSystemConfig(gdb); err != nil {
 		return err
 	}
-	// 默认接入应用必须在**基础层**：生产编排默认 LD_SEED_ENABLED=0，
-	// 放进演示层等于"部署完没有任何应用"，托管密钥链路在管理员手工建应用之前不可达。
+	// 默认接入应用必须在基础层：没有它，"部署完没有任何应用"，托管密钥链路在
+	// 管理员手工建应用之前不可达。
 	if err := seedDefaultApp(gdb); err != nil {
 		return err
 	}
-	if conf.EnvConfig().SeedEnabled {
-		if err := seedVendors(gdb); err != nil {
-			return err
-		}
-		if err := seedModels(gdb); err != nil {
-			return err
-		}
-		if err := seedChannels(gdb); err != nil {
-			return err
-		}
-		if err := seedBindings(gdb); err != nil {
-			return err
-		}
-		if err := seedPackages(gdb); err != nil {
-			return err
-		}
+	// 供应商是**参考数据**（模型分组、门户按 vendor 投影都依赖它），不是演示数据：
+	// 内置预设引用的 vendor 不存在时，模型写入会在 requireVendor 处失败
+	// （表现是启动失败，而不是缺一行分组）。
+	if err := seedVendors(gdb); err != nil {
+		return err
+	}
+	// 套餐是**商品目录**的出厂档位（充值页要有东西可买），与"上游配置"无关。
+	if err := seedPackages(gdb); err != nil {
+		return err
 	}
 	return SeedModalityDefaults(gdb)
 }
@@ -441,188 +436,3 @@ func seedVendors(gdb *gorm.DB) error {
 	}
 	return nil
 }
-
-// p 把「元」写成微，仅供种子数据使用（价格写错会在启动时 panic，而不是上线后算错钱）。
-func p(yuan string) *int64 {
-	v := money.MustParse(yuan)
-	return &v
-}
-
-// specPrices 把结构化价目写成 JSONB 值（走 model.SpecPrices 的唯一键集）。
-func specPrices(v model.SpecPrices) model.JSON { return model.MustJSON(v) }
-
-func seedModels(gdb *gorm.DB) error {
-	rows := []model.Model{
-		{ID: "gpt-4o", DisplayName: "GPT-4o", Vendor: "openai", Modality: "chat",
-			BillingMode: model.BillingModeTokens, Enabled: true, IsDefault: true,
-			Prices:    model.Prices{Input: p("18.00"), Output: p("72.00"), Cache: p("9.00")},
-			Endpoints: model.MustJSON([]string{"chat/completions", "responses"})},
-		{ID: "claude-sonnet-4-5", DisplayName: "Claude Sonnet 4.5", Vendor: "anthropic", Modality: "chat",
-			BillingMode: model.BillingModeTokens, Enabled: true,
-			Prices: model.Prices{Input: p("21.60"), Output: p("108.00"), Cache: p("2.16"), CacheCreate: p("27.00")},
-			// /v1/messages 是**协议变体**（EndpointKey 为空，见 apidoc/kind.go），
-			// 不是模型能声明的能力键 —— 声明它会被判定为未知端点。
-			Endpoints: model.MustJSON([]string{"chat/completions"})},
-		{ID: "deepseek-v3.2", DisplayName: "DeepSeek V3.2", Vendor: "deepseek", Modality: "chat",
-			BillingMode: model.BillingModeTokens, Enabled: true,
-			Prices:    model.Prices{Input: p("2.00"), Output: p("8.00"), Cache: p("0.50")},
-			Endpoints: model.MustJSON([]string{"chat/completions"})},
-		{ID: "text-embedding-3-large", DisplayName: "Embedding 3L", Vendor: "openai", Modality: "embedding",
-			BillingMode: model.BillingModeTokens, Enabled: true,
-			Prices:    model.Prices{Input: p("0.94")},
-			Endpoints: model.MustJSON([]string{"embeddings"})},
-		{ID: "kling-v2-master", DisplayName: "可灵 2.0 master", Vendor: "kling", Modality: "video",
-			BillingMode: model.BillingModeSpec, Enabled: true, IsDefault: true,
-			SpecPrices: model.SpecPrices{
-				Kind:          "per_video",
-				SecondPrice:   map[string]int64{"480p": money.MustParse("0.96"), "720p": money.MustParse("1.20"), "1080p": money.MustParse("1.80")},
-				RefImagePrice: p("1.50"), RefVideoPrice: p("4.00"), RefAudioPrice: p("2.50"),
-			},
-			Endpoints: model.MustJSON([]string{"video/generations"})},
-		{ID: "tts-1-hd", DisplayName: "TTS HD", Vendor: "openai", Modality: "audio",
-			BillingMode: model.BillingModeCall, Enabled: true, IsDefault: true,
-			Prices:    model.Prices{Call: p("0.32")},
-			Endpoints: model.MustJSON([]string{"audio/speech"})},
-		{ID: "gpt-image-1", DisplayName: "GPT Image 1", Vendor: "openai", Modality: "image",
-			BillingMode: model.BillingModeSpec, Enabled: true,
-			// 只配 1K 一档：OpenAI 图片接口只有 1024x1024 / 1536x1024 / 1024x1536 三个枚举，
-			// 根本出不了 2K / 4K。之前配了 2K/4K 价，等于卖一个上游交付不了的档位 ——
-			// 用户付 2K 的钱，要么被上游 400，要么拿到 1024 的图。
-			SpecPrices: model.SpecPrices{
-				Kind:            "per_image",
-				TierPrice:       map[string]int64{"1K": money.MustParse("0.60")},
-				ResolutionFixed: "1K", MaxN: iptr(10),
-			},
-			Endpoints: model.MustJSON([]string{"images/generations"})},
-		{ID: "whisper-1", DisplayName: "Whisper 语音转写", Vendor: "openai", Modality: "audio",
-			BillingMode: model.BillingModeCall, Enabled: true,
-			Prices:    model.Prices{Call: p("0.09")},
-			Endpoints: model.MustJSON([]string{"audio/transcriptions"})},
-		{ID: "qwen3-reranker", DisplayName: "Qwen3 Reranker", Vendor: "alibaba", Modality: "rerank",
-			BillingMode: model.BillingModeTokens, Enabled: true, IsDefault: true,
-			Prices:    model.Prices{Input: p("0.72")},
-			Endpoints: model.MustJSON([]string{"rerank"})},
-		{ID: "omni-moderation", DisplayName: "Omni Moderation", Vendor: "openai", Modality: "moderation",
-			BillingMode: model.BillingModeCall, Enabled: true, IsDefault: true,
-			Prices:    model.Prices{Call: p("0.02")},
-			Endpoints: model.MustJSON([]string{"moderations"})},
-	}
-	for i := range rows {
-		rows[i].IsFree = rows[i].PricingIsFree()
-	}
-	if err := gdb.Clauses(clause.OnConflict{DoNothing: true}).Create(&rows).Error; err != nil {
-		return fmt.Errorf("db: 种子 models 失败: %w", err)
-	}
-	return nil
-}
-
-// seedChannels 只在**空表**时写入演示渠道。
-//
-// 为什么必须用空表判断而不是 OnConflict{DoNothing}：
-// channels 是自增主键、除主键外**没有任何唯一索引**，OnConflict 什么都拦不住 ——
-// 重复启动会把渠道再插一遍，选路按 weight 随机派发，限流/熔断/健康度全部失真。
-func seedChannels(gdb *gorm.DB) error {
-	var n int64
-	if err := gdb.Unscoped().Model(&model.Channel{}).Count(&n).Error; err != nil {
-		return err
-	}
-	if n > 0 {
-		return nil
-	}
-	channels := []model.Channel{
-		{Name: "OpenAI 官方", AdapterID: "openai", BaseURL: "https://api.openai.com",
-			Icon: "builtin:openai-gpt",
-			Keys: fernetKeys("sk-demo-openai-key"), MultiKeyMode: "polling",
-			Groups: model.MustJSON([]string{"default", "vip"}), Weight: 10, Priority: 1,
-			MaxConcurrency: 50, RPMLimit: 500, Status: 1, AutoBan: true},
-		// 火山方舟（Ark）**不在这里**：它的数据面在 `/api/v3`，而 openai 适配器打的是
-		// `/v1` 前缀，配一条 base 到主域的 demo 渠道只会得到 100% 的 404。
-		// 它由内置预设层写入（`seed_builtin_ark.go`，停用 + 空密钥，等运营填 KEY）。
-	}
-	return gdb.Create(&channels).Error
-}
-
-// fernetKeys 把演示密钥加密为 Fernet token 数组（与 channels.keys 存储体例一致）。
-func fernetKeys(plain ...string) model.JSON {
-	master := crypto.FernetDerive(conf.EnvConfig().AppEncryptionKey)
-	tokens := make([]string, 0, len(plain))
-	for _, k := range plain {
-		if t, err := crypto.FernetEncrypt(master, []byte(k)); err == nil {
-			tokens = append(tokens, t)
-		}
-	}
-	return model.MustJSON(tokens)
-}
-
-// seedBindingSpec 描述一条演示绑定：模型 → 哪个渠道（按 adapter_id + base_url 定位）。
-//
-// 为什么不直接写 channel_id：自增主键不可预测。硬编码 1/2 时，
-// 任何一次「删过渠道再重建」都会让绑定指向不存在或不相干的渠道，
-// 而表象是「模型广场有模型、调用 404 无可用渠道」。
-type seedBindingSpec struct {
-	modelID   string
-	adapterID string
-	baseURL   string
-	upstream  string
-	weight    int
-	priority  int
-}
-
-func seedBindings(gdb *gorm.DB) error {
-	specs := []seedBindingSpec{
-		{modelID: "gpt-4o", adapterID: "openai", baseURL: "https://api.openai.com", weight: 10, priority: 1},
-		{modelID: "text-embedding-3-large", adapterID: "openai", baseURL: "https://api.openai.com", weight: 5, priority: 1},
-		{modelID: "tts-1-hd", adapterID: "openai", baseURL: "https://api.openai.com", weight: 5, priority: 1},
-		// 异步视频：当前仅 openai 适配器实现 SubmitTask/PollTask，故视频模型绑定到 OpenAI 兼容渠道。
-		{modelID: "kling-v2-master", adapterID: "openai", baseURL: "https://api.openai.com",
-			upstream: "kling-v2-master", weight: 5, priority: 1},
-		{modelID: "gpt-image-1", adapterID: "openai", baseURL: "https://api.openai.com", weight: 5, priority: 1},
-		{modelID: "whisper-1", adapterID: "openai", baseURL: "https://api.openai.com", weight: 5, priority: 1},
-		{modelID: "qwen3-reranker", adapterID: "openai", baseURL: "https://api.openai.com",
-			upstream: "qwen3-reranker", weight: 5, priority: 1},
-		{modelID: "omni-moderation", adapterID: "openai", baseURL: "https://api.openai.com", weight: 5, priority: 1},
-	}
-
-	// 渠道与模型都可能已被运营删除（演示数据本来就该能删干净），
-	// 因此逐条「能解析才写」：解析不到就跳过，绝不留孤儿绑定。
-	channels := make([]model.Channel, 0, 4)
-	if err := gdb.Select("id", "adapter_id", "base_url").Find(&channels).Error; err != nil {
-		return err
-	}
-	channelID := func(adapterID, baseURL string) uint64 {
-		for i := range channels {
-			if channels[i].AdapterID == adapterID && strings.TrimRight(channels[i].BaseURL, "/") == strings.TrimRight(baseURL, "/") {
-				return channels[i].ID
-			}
-		}
-		return 0
-	}
-
-	rows := make([]model.ModelBinding, 0, len(specs))
-	for _, s := range specs {
-		cid := channelID(s.adapterID, s.baseURL)
-		if cid == 0 {
-			continue
-		}
-		var n int64
-		if err := gdb.Model(&model.Model{}).Where("id = ?", s.modelID).Count(&n).Error; err != nil {
-			return err
-		}
-		if n == 0 {
-			continue
-		}
-		rows = append(rows, model.ModelBinding{
-			ModelID: s.modelID, ChannelID: cid, UpstreamModel: s.upstream,
-			Weight: s.weight, Priority: s.priority, Enabled: true,
-		})
-	}
-	if len(rows) == 0 {
-		return nil
-	}
-	if err := gdb.Clauses(clause.OnConflict{DoNothing: true}).Create(&rows).Error; err != nil {
-		return fmt.Errorf("db: 种子 model_bindings 失败: %w", err)
-	}
-	return nil
-}
-
-func iptr(v int64) *int64 { return &v }

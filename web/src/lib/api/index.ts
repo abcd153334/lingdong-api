@@ -48,6 +48,7 @@ import type {
   ChannelKeysResult,
   ChannelPayload,
   ChannelTestResult,
+  PresetRestoreResult,
   CreateKeyResult,
   KeyPayload,
   KeySecretResult,
@@ -85,8 +86,7 @@ import type {
   SessionItem,
   TopupResult,
   TransactionItem,
-  UpstreamPreviewItem,
-  UpstreamSource,
+  UpstreamSearchResult,
   UploadConfig,
   UploadItem,
   PortalCallDetail,
@@ -171,7 +171,9 @@ export const queryKeys = {
   adminVendors: ["admin", "vendors"] as const,
   /** 图标图库（内置 + 最近上传）；只在选择器里用 */
   adminIcons: ["admin", "icons"] as const,
-  upstreamSources: ["admin", "upstream", "sources"] as const,
+  /** 上游参考价：键里带关键词与供应商偏好，同词重开命中缓存、换词立即是新请求 */
+  upstreamSearch: (p: { keyword: string; vendor: string }) =>
+    ["admin", "upstream", "search", p] as const,
   /* S4 */
   adminChannels: (params: AdminChannelsParams) => ["admin", "channels", params] as const,
   adminChannelKeys: (id: number) => ["admin", "channels", id, "keys"] as const,
@@ -873,8 +875,29 @@ function useInvalidateCatalog() {
   };
 }
 
+/**
+ * 会改写「渠道行的绑定摘要」的模型写操作：模型列表 + 渠道列表 + 定价一起失效。
+ *
+ * 渠道行的 `bound_models` 是左栏浮层「N 个模型」与 `BindDialog`「已绑定」标记的
+ * **唯一**来源：
+ *  - 在渠道内新建模型带 `initial_binding` → 只失效模型列表就会"右栏已经列出新行，
+ *    左栏还写着旧计数，绑定选择器里还把刚建的模型标成可绑定"；
+ *  - 编辑模型会改图标与展示名（`bound_models[].icon_url` 派生自模型）→ 左栏图示变旧。
+ *
+ * 启停与删除**不进**这个集合：前者不改任何渠道字段；后者被后端拦在"仍有绑定"之外
+ *（删除成功 = 本来就没有绑定）。让它们每次都拉一遍全量渠道纯属浪费。
+ */
+function useInvalidateCatalogAndChannels() {
+  const queryClient = useQueryClient();
+  const invalidateCatalog = useInvalidateCatalog();
+  return () => {
+    invalidateCatalog();
+    void queryClient.invalidateQueries({ queryKey: queryKeys.adminChannelsAll });
+  };
+}
+
 export function useCreateAdminModelMutation() {
-  const invalidate = useInvalidateCatalog();
+  const invalidate = useInvalidateCatalogAndChannels();
   return useMutation({
     mutationFn: (body: AdminModelPayload) =>
       apiClient.post<{ item: AdminModelItem; warnings?: string[] }>("/admin/models", body),
@@ -883,7 +906,7 @@ export function useCreateAdminModelMutation() {
 }
 
 export function useUpdateAdminModelMutation() {
-  const invalidate = useInvalidateCatalog();
+  const invalidate = useInvalidateCatalogAndChannels();
   return useMutation({
     mutationFn: ({ id, body }: { id: string; body: AdminModelPayload }) =>
       apiClient.put<{ item: AdminModelItem; warnings?: string[] }>(`/admin/models/${id}`, body),
@@ -913,14 +936,12 @@ export function useDeleteAdminModelMutation() {
  * 与删除拦截都读 `bound_models`）+ 门户定价（渠道数）。
  *
  * 少失效渠道列表的表现是：解绑后左栏仍写着「3 个模型」，去删渠道又被后端 409。
+ *
+ * 与模型写操作共用同一条集合（见 `useInvalidateCatalogAndChannels`）：绑定数同时长在
+ * 两边的行上，任何一边单独失效都会出现两张表各说一套。
  */
 function useInvalidateBindings() {
-  const queryClient = useQueryClient();
-  const invalidateCatalog = useInvalidateCatalog();
-  return () => {
-    invalidateCatalog();
-    void queryClient.invalidateQueries({ queryKey: queryKeys.adminChannelsAll });
-  };
+  return useInvalidateCatalogAndChannels();
 }
 
 /**
@@ -1065,19 +1086,33 @@ function uploadedItemOf(res: {
   return { id: res.id, icon: res.icon, url: res.url, size: res.size, created_at: res.created_at };
 }
 
-export function useUpstreamSourcesQuery(enabled = true) {
-  return useQuery({
-    queryKey: queryKeys.upstreamSources,
-    queryFn: () => apiClient.get<{ sources: UpstreamSource[] }>("/admin/upstream/sources"),
-    enabled,
-    staleTime: 5 * 60_000,
-  });
+export interface UpstreamPriceParams {
+  keyword: string;
+  /** 当前模型所属供应商：只影响同名去重时的排序偏好，不参与过滤 */
+  vendor?: string;
 }
 
-export function useUpstreamPreviewMutation() {
-  return useMutation({
-    mutationFn: (source: string) =>
-      apiClient.post<{ items: UpstreamPreviewItem[] }>("/admin/upstream/preview", { source }),
+/**
+ * 上游参考价查询（models.dev 公开数据，服务端 10 分钟快照）。
+ *
+ * `meta.silent`：失败在面板内联展示，不弹全局 toast —— 它是个辅助查询，
+ * 拉不到不该在整页顶上飘一条红条。
+ * `keyword.length >= 2`：单字符既没有检索价值，又会白白触发一次 7MB 快照拉取。
+ * 不传 limit：条数上限只在后端定义一处。
+ */
+export function useUpstreamPriceQuery(p: UpstreamPriceParams, enabled = true) {
+  const keyword = p.keyword.trim();
+  const vendor = p.vendor ?? "";
+  return useQuery({
+    queryKey: queryKeys.upstreamSearch({ keyword, vendor }),
+    queryFn: ({ signal }) =>
+      apiClient.get<UpstreamSearchResult>("/admin/upstream/search", {
+        signal,
+        query: { keyword, vendor },
+      }),
+    enabled: enabled && keyword.length >= 2,
+    staleTime: 5 * 60_000,
+    meta: { silent: true },
   });
 }
 
@@ -1278,6 +1313,34 @@ export function usePatchAdminChannelKeysMutation() {
     onSuccess: (data, vars) => {
       queryClient.setQueryData(queryKeys.adminChannelKeys(vars.id), data);
       invalidate();
+    },
+  });
+}
+
+/* --------------------------- 内置预设（恢复出厂） --------------------------- */
+
+/**
+ * 恢复出厂（`dry_run` 只预览，事务回滚，库里不变）。
+ *
+ * 这是唯一会**覆盖**运营改名/改价/改绑定的动作，所以：
+ *  - 后端要求 `confirm:"RESTORE"`（不是"点了个红按钮"就算确认，脚本误调也会被拦）；
+ *  - 前端一律先 dry_run 拿到计数再让人确认，绝不直接写；
+ *  - 只有真跑才失效缓存 —— dry_run 回的是预览数据，刷新列表纯属浪费且会让
+ *    "预览"看起来像"已经改了"。
+ */
+export function useRestorePresetsMutation() {
+  const queryClient = useQueryClient();
+  const invalidate = useInvalidateChannels();
+  return useMutation({
+    mutationFn: (body: { group?: string; dry_run?: boolean; keep_enabled?: boolean; confirm?: string }) =>
+      apiClient.post<PresetRestoreResult>("/admin/presets/restore", body),
+    onSuccess: (data) => {
+      if (!data.dry_run) invalidate();
+    },
+    onError: () => {
+      // 失败时也要刷一次：事务可能已部分提交（单组内多条 UPDATE 在同一事务，
+      // 整体回滚，但重试前让界面回到服务端事实比留着旧数字更安全）。
+      void queryClient.invalidateQueries({ queryKey: queryKeys.adminChannelsAll });
     },
   });
 }

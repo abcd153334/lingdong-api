@@ -26,6 +26,8 @@ const (
 	ActionChannelDelete      = "channel.delete"
 	ActionChannelTest        = "channel.test"
 	ActionChannelBatchStatus = "channel.batch_status"
+	// ActionPresetRestore 记录「恢复出厂」：唯一会覆盖运营对内置渠道/模型改动的动作。
+	ActionPresetRestore = "preset.restore"
 
 	ActionModelCreate         = "model.create"
 	ActionModelUpdate         = "model.update"
@@ -212,6 +214,7 @@ var AllowedActions = []string{
 	ActionUserPasswordReset,
 
 	ActionChannelCreate, ActionChannelUpdate, ActionChannelDelete, ActionChannelTest, ActionChannelBatchStatus,
+	ActionPresetRestore,
 
 	ActionModelCreate, ActionModelUpdate, ActionModelDelete, ActionModelBatchStatus,
 	ActionModelRatioUpdate, ActionModelBindingsUpdate,

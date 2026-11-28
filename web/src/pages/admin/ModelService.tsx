@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useSearch } from "@tanstack/react-router";
 
 import { useAdminAdaptersQuery, useAdminChannelsQuery } from "@/lib/api";
@@ -11,9 +11,10 @@ import type { ChannelItem } from "@/types";
 
 import { ChannelForm } from "./model-service/ChannelForm";
 import { ModelPanel } from "./model-service/ModelPanel";
+import { PresetRestoreDialog } from "./model-service/PresetRestoreDialog";
 import { Rail } from "./model-service/Rail";
 import { groupChannels } from "./model-service/grouping";
-import { focusOf, nextSelection } from "./model-service/selection";
+import { nextState, ORPHANS, type FlyoutOpen } from "./model-service/state";
 
 /**
  * 模型服务（适配器 → 渠道 → 模型，两栏贴边）。
@@ -26,9 +27,10 @@ import { focusOf, nextSelection } from "./model-service/selection";
  *  1. **左栏不做搜索/筛选**（需求原文）：它是导航，不是数据表。搜索只在模型列表；
  *  2. 页面**四面贴边、没有标题行**：`.a-content` 的 24px 内边距由
  *     `model-service.css` 的 `:has()` 逃逸掉，h1 用 `.a11y-only` 满足可访问名门禁；
- *  3. 选中状态进 URL（`?a` / `?c`），搜索与分页不进 —— 前者是"发给同事"的东西，
- *     后者是我的浏览状态；
- *  4. **点适配器不动右栏**：只展开/收起左边。这是本页最容易写错的一条 ——
+ *  3. 只有「在看哪条渠道」进 URL（`?c`）：它是唯一值得发给同事的状态。
+ *     浮层开在哪个适配器是**瞬态**，进 URL 会立刻引出"两处高亮谁优先 / 关抽屉后残留 /
+ *     孤儿桶要第三个参数"三个新问题，收益为零；
+ *  4. **点适配器不动右栏**：只开浮层。这是本页最容易写错的一条 ——
  *     旧实现顺带把 `?c` 删掉，operator 点一下就看到一整页空白。
  */
 export function AdminModelServicePage() {
@@ -45,7 +47,7 @@ export function AdminModelServicePage() {
 
   const adapters = useMemo(() => adaptersQ.data?.items ?? [], [adaptersQ.data]);
   const channels = useMemo(() => channelsQ.data?.items ?? [], [channelsQ.data]);
-  // groupChannels 每次都重排一遍；不 memo 的话下面依赖 `model.groups` 的 effect 每帧都跑。
+  // groupChannels 每次都重排一遍；不 memo 的话依赖 `model` 的 effect 每帧都跑。
   const model = useMemo(() => groupChannels(adapters, channels), [adapters, channels]);
   const groupIds = useMemo(() => model.groups.map((g) => g.id), [model]);
 
@@ -59,30 +61,18 @@ export function AdminModelServicePage() {
   const activeChannel =
     channels.find((c) => c.id === search.c) ?? (pending?.id === search.c ? pending : null);
   const activeId = activeChannel?.id;
-  const activeAdapterId = activeChannel?.adapter_id;
 
-  /** 展开态是本地 state：URL 的 `?a` 表达不了「全部折叠」 */
-  const [openId, setOpenId] = useState("");
-  const focusId = focusOf(search.a, activeChannel, groupIds);
-  /**
-   * 无选中渠道时右栏要展示的适配器：优先**当前展开的那个**，其次 `?a`。
-   *
-   * 用 openId 而不是只用 focusId：首屏默认展开第一组（左栏已经摊开），
-   * 若右栏还写"从左侧选一个适配器"，用户会看到"左边明明展开了、右边却说没选"。
-   * 全部折叠且没有选中渠道时才落到根提示。
-   */
-  const activeGroup = useMemo(() => {
-    if (activeChannel) return null;
-    const id = openId || focusId;
-    return id ? (model.groups.find((g) => g.id === id) ?? null) : null;
-  }, [activeChannel, openId, focusId, model.groups]);
+  /** 浮层开在哪。桌面 = 二级面板；≤899 复用为"抽屉钻取到哪个适配器"，关抽屉即复位。 */
+  const [open, setOpen] = useState<FlyoutOpen>("");
+
+  /** `?c` 已写但渠道还没解析出来（深链首帧）：此时不要先按全量发一次请求。 */
+  const channelPending = !!search.c && !activeChannel;
 
   const go = useCallback(
-    (next: { a?: string; c?: number }) => {
-      // 只写 a/c，且用新对象整体替换：本页只有这两个参数，spread 旧值会把
-      // 刚判为失效的 c 再带回来。
+    (c?: number) => {
+      // 只写 c，整体替换 search：本页只有这一个参数，spread 旧值会把刚判为失效的 c 带回来。
       void navigate({
-        search: () => ({ ...(next.a ? { a: next.a } : {}), ...(next.c ? { c: next.c } : {}) }),
+        search: () => (c ? { c } : {}),
         replace: true,
         resetScroll: false,
       });
@@ -90,106 +80,97 @@ export function AdminModelServicePage() {
     [navigate],
   );
 
-  // ① 默认展开：数据首次到位时落一次。
-  //    不能写进 useState 初始化 —— 首帧 channels 是空的，只能算出"全折叠"。
-  const inited = useRef(false);
-  useEffect(() => {
-    if (inited.current || !adaptersQ.isSuccess || !channelsQ.isSuccess) return;
-    inited.current = true;
-    const def = focusId || model.groups.find((g) => g.channels.length > 0)?.id || "";
-    if (def) setOpenId(def);
-  }, [adaptersQ.isSuccess, channelsQ.isSuccess, focusId, model.groups]);
-
-  // ② 深链 `?a`：只对「从空变非空」响应。
-  //    折叠时 a 会从 A 变成 undefined，按值同步会立刻把组重新展开 —— 折叠永远不生效。
-  const prevA = useRef(search.a);
-  useEffect(() => {
-    if (search.a && search.a !== prevA.current) setOpenId(search.a);
-    prevA.current = search.a;
-  }, [search.a]);
-
-  // ③ 选中变化 → 展开其所属组（点渠道 / 深链 ?c / 新建后选中）
-  useEffect(() => {
-    if (activeAdapterId) setOpenId(activeAdapterId);
-  }, [activeId, activeAdapterId]);
-
-  // ④ 纠偏三件事。必须等渠道列表成功：首帧 channels=[] 会把合法的深链 `?c` 当场清掉。
+  // 纠偏 ①：`?c` 指向已不存在的渠道 → 清掉，回到全部模型。
+  // 必须等渠道列表成功：首帧 channels=[] 会把合法的深链当场清掉。
   useEffect(() => {
     if (!channelsQ.isSuccess || pending) return;
-    // (a) ?c 指向已不存在的渠道 → 清 c（保留 a，右栏落回该适配器的总览）
-    if (search.c && !activeId) {
-      go({ a: search.a });
-      return;
-    }
-    // (b) ?a 不在适配器清单里 → 清 a
-    if (search.a && !groupIds.includes(search.a)) {
-      go({ c: search.c });
-      return;
-    }
-    // (c) a 与 c 所属适配器不一致 → 以 c 为准回填 a。
-    //     必须带 `search.a` 守卫：折叠含选中渠道的组时 a 被清空、c 保留，
-    //     少了这个守卫，刚折叠就会被回填成 a=A 并由 effect ② 重新展开。
-    if (search.a && activeAdapterId && search.a !== activeAdapterId) {
-      go({ a: activeAdapterId, c: search.c });
-    }
-  }, [channelsQ.isSuccess, search.a, search.c, activeId, activeAdapterId, groupIds, pending, go]);
+    if (search.c && !activeId) go();
+  }, [channelsQ.isSuccess, search.c, activeId, pending, go]);
+
+  // 纠偏 ②：浮层指向的适配器已不在清单里（被删/停用后重拉）→ 关掉浮层。
+  useEffect(() => {
+    if (!open || open === ORPHANS) return;
+    if (adaptersQ.isSuccess && !groupIds.includes(open)) setOpen("");
+  }, [open, adaptersQ.isSuccess, groupIds]);
 
   // pending 进入真实列表后立刻退场，否则它会一直盖住服务端的最新数据
   useEffect(() => {
     if (pending && channels.some((c) => c.id === pending.id)) setPending(null);
   }, [channels, pending]);
 
+  /** 关抽屉同时复位钻取：否则下次打开会直接停在渠道列表里，用户以为适配器没了。 */
+  const closeDrawer = useCallback(() => {
+    setRailOpen(false);
+    setOpen("");
+  }, []);
+
+  const openRail = useCallback(() => {
+    setOpen("");
+    setRailOpen(true);
+  }, []);
+
   const toggleAdapter = useCallback(
     (id: string) => {
-      const g = model.groups.find((x) => x.id === id);
-      const res = nextSelection(
-        { open: openId, channel: activeChannel },
-        { kind: "toggle", id, channelIds: (g?.channels ?? []).map((c) => c.id) },
-      );
-      setOpenId(res.open);
-      go(res);
+      // 抽屉里点卡片 = 钻取（同一块地方换内容），不关抽屉
+      if (drawer) {
+        setOpen((prev) => (prev === id ? "" : id));
+        return;
+      }
+      setOpen((prev) => nextState({ open: prev, c: activeId }, { kind: "toggleAdapter", id }).open);
     },
-    [model.groups, openId, activeChannel, go],
+    [drawer, activeId],
   );
+
+  const toggleOrphans = useCallback(() => {
+    setOpen((prev) => nextState({ open: prev, c: activeId }, { kind: "openOrphans" }).open);
+  }, [activeId]);
+
+  const showAll = useCallback(() => {
+    setOpen("");
+    go();
+  }, [go]);
 
   const selectChannel = useCallback(
     (ch: ChannelItem) => {
-      const res = nextSelection(
-        { open: openId, channel: activeChannel },
-        { kind: "select", channel: ch, knownAdapters: groupIds },
-      );
-      setOpenId(res.open);
-      go(res);
-      // 抽屉里点完就收：否则右栏被遮住，用户还得再点一次遮罩
+      // 选中即关：浮层是"选完就走"的导航，留着会压住刚切过去的表格
+      setOpen("");
       setRailOpen(false);
+      go(ch.id);
     },
-    [openId, activeChannel, groupIds, go],
+    [go],
   );
 
-  const channelDeleted = useCallback(
-    (adapterId: string) => {
-      const res = nextSelection({ open: openId, channel: activeChannel }, { kind: "delete", adapterId });
-      setOpenId(res.open);
-      go(res);
-    },
-    [openId, activeChannel, go],
-  );
+  /** 渠道删掉了：URL 指向的行已经不存在，直接回全部模型（停在空渠道视图没有意义）。 */
+  const channelDeleted = useCallback(() => {
+    setOpen("");
+    go();
+  }, [go]);
 
   /** 新建渠道成功：直接落到它（否则用户看到"保存了，右边没变"）。 */
   const channelCreated = useCallback(
     (ch: ChannelItem) => {
       setPending(ch);
-      const res = nextSelection(
-        { open: openId, channel: null },
-        { kind: "select", channel: ch, knownAdapters: groupIds },
-      );
-      setOpenId(res.open);
-      go(res);
+      setOpen("");
+      go(ch.id);
     },
-    [openId, groupIds, go],
+    [go],
   );
 
   const agent = useLazyOverlay();
+
+  /**
+   * 「恢复出厂」弹窗。
+   *
+   * 打开前先关抽屉与浮层：二者 z-index 低于弹窗，留着会压在遮罩下面变成
+   * "看得见但点不动"的假可点区域。
+   */
+  const [restoreOpen, setRestoreOpen] = useState(false);
+  const openRestore = useCallback(() => {
+    setOpen("");
+    setRailOpen(false);
+    setRestoreOpen(true);
+  }, []);
+  const closeRestore = useCallback(() => setRestoreOpen(false), []);
 
   /**
    * 渠道表单的目标。
@@ -203,14 +184,27 @@ export function AdminModelServicePage() {
     adapterId?: string;
   }>({ open: false, channel: null });
 
-  const openCreateChannel = useCallback(
-    (adapterId: string) => setChanForm({ open: true, channel: null, adapterId }),
-    [],
-  );
-  const openEditChannel = useCallback(
-    (ch: ChannelItem) => setChanForm({ open: true, channel: ch }),
-    [],
-  );
+  /**
+   * 任何"要开弹层"的动作都必须**先关浮层**。
+   *
+   * `--z-pop`(70) 高于抽屉/弹窗(60)，而页面层的 `useOverlayOpen()` 恒为 true
+   * （Provider 只在 Dialog/Drawer 内部），浮层不会自动让位 —— 不关就会盖在
+   * 刚打开的抽屉上面。
+   */
+  const openCreateChannel = useCallback((adapterId: string) => {
+    setOpen("");
+    setRailOpen(false);
+    setChanForm({ open: true, channel: null, adapterId });
+  }, []);
+  const openEditChannel = useCallback((ch: ChannelItem) => {
+    setOpen("");
+    setChanForm({ open: true, channel: ch });
+  }, []);
+  const onCreateAdapter = useCallback(() => {
+    setOpen("");
+    setRailOpen(false);
+    agent.openOverlay();
+  }, [agent]);
   const closeChannelForm = useCallback(() => setChanForm((f) => ({ ...f, open: false })), []);
 
   return (
@@ -220,9 +214,8 @@ export function AdminModelServicePage() {
 
       <Rail
         model={model}
-        openId={openId}
-        focusId={focusId}
-        activeChannel={activeId ?? 0}
+        open={open}
+        activeChannel={activeChannel}
         loading={adaptersQ.isLoading || channelsQ.isLoading}
         error={adaptersQ.error ?? channelsQ.error}
         onRetry={() => {
@@ -231,21 +224,23 @@ export function AdminModelServicePage() {
         }}
         drawer={drawer}
         drawerOpen={railOpen}
-        onCloseDrawer={() => setRailOpen(false)}
+        onCloseDrawer={closeDrawer}
         onToggleAdapter={toggleAdapter}
+        onToggleOrphans={toggleOrphans}
+        onShowAll={showAll}
         onSelectChannel={selectChannel}
         onCreateChannel={openCreateChannel}
-        onCreateAdapter={agent.openOverlay}
+        onCreateAdapter={onCreateAdapter}
+        onDrillBack={() => setOpen("")}
+        onRestorePresets={openRestore}
       />
 
       <ModelPanel
         channel={activeChannel}
-        group={activeGroup}
+        channelPending={channelPending}
         onEditChannel={openEditChannel}
         onChannelDeleted={channelDeleted}
-        onSelectChannel={selectChannel}
-        onCreateChannel={openCreateChannel}
-        onOpenRail={() => setRailOpen(true)}
+        onOpenRail={openRail}
       />
 
       <ChannelForm
@@ -263,6 +258,8 @@ export function AdminModelServicePage() {
 
       {/* 懒挂载：首次点「新建适配器」才挂载，之后关闭只切 open —— 会话与草稿都留着。 */}
       {agent.mounted ? <AgentDialog open={agent.open} onClose={agent.closeOverlay} /> : null}
+
+      <PresetRestoreDialog open={restoreOpen} onClose={closeRestore} />
     </div>
   );
 }

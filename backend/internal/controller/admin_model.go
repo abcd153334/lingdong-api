@@ -9,6 +9,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/gin-gonic/gin"
 	"go.uber.org/zap"
@@ -86,6 +87,12 @@ type adminModelItem struct {
 	// Version 是乐观锁版本号：编辑保存时必须回传，否则并发改价会静默覆盖。
 	Version  int   `json:"version"`
 	Bindings int64 `json:"bindings"`
+	// PresetGroup 是「出厂内置」标记（"" = 运营自建）。
+	//
+	// 为什么下发给前端：①列表要能标出哪些行会被「恢复出厂」覆盖，否则那个按钮
+	// 对运营是不透明的；②入口按"有没有内置行"决定可见性，不需要额外接口。
+	// 它**只用于展示与筛选**，不是编辑开关 —— 内置行照样可以改名改价。
+	PresetGroup string `json:"preset_group"`
 	// Binding 是该模型在**当前筛选渠道**上的绑定；只有请求带 channel_id 时才下发。
 	//
 	// 为什么放进列表项而不是另开一条「渠道的模型」接口：右栏就是「某渠道的模型列表」，
@@ -858,31 +865,34 @@ func DeleteAdminVendor(c *gin.Context) {
 	response.OK(c, nil)
 }
 
-// ListUpstreamSources 处理 GET /api/admin/upstream/sources。
-func ListUpstreamSources(c *gin.Context) {
-	response.OK(c, gin.H{"sources": upstream.Sources()})
-}
+// searchUpstream 是 handler 的可替换依赖：controller 测试不连公网。
+var searchUpstream = upstream.Search
 
-// PreviewUpstream 处理 POST /api/admin/upstream/preview（真实拉取 → 与本地模型 diff，只读不写入）。
-func PreviewUpstream(c *gin.Context) {
-	var req struct {
-		Source string `json:"source"`
-	}
-	if err := c.ShouldBindJSON(&req); err != nil || req.Source == "" {
-		response.FailDef(c, errs.InvalidParam)
+// SearchUpstream 处理 GET /api/admin/upstream/search?keyword=&vendor=。
+//
+// 只读参考价查询：不写库、不审计（与"改价"是两个动作，改价仍走 PUT /models/:id）。
+// keyword 必填：空关键词返回全库前 20 条对运营没有任何意义，还会把 7MB 的拉取浪费在
+// 一次"什么都没查"的请求上。
+func SearchUpstream(c *gin.Context) {
+	keyword := strings.TrimSpace(c.Query("keyword"))
+	if keyword == "" {
+		response.FailDefMsg(c, errs.InvalidParam, "请先输入要查询的模型名称")
 		return
 	}
-	items, err := upstream.Preview(c.Request.Context(), req.Source)
+	if utf8.RuneCountInString(keyword) > 64 {
+		response.FailDefMsg(c, errs.InvalidParam, "模型名称过长")
+		return
+	}
+	res, err := searchUpstream(c.Request.Context(), keyword, strings.TrimSpace(c.Query("vendor")))
 	if err != nil {
-		if errors.Is(err, upstream.ErrSourceUnavailable) {
-			logger.L().Warn("上游价目拉取失败", zap.String("source", req.Source), zap.Error(err))
-			response.FailDef(c, errs.ServiceUnavailable)
-			return
-		}
-		response.FailDef(c, errs.Internal)
+		// 失败文案必须能指导下一步：泛化的"服务暂时不可用"对"上游价目拉不到"毫无帮助。
+		logger.L().Warn("上游参考价查询失败", zap.String("keyword", keyword), zap.Error(err))
+		response.FailDefMsg(c, errs.ServiceUnavailable, "参考价暂时拉不到，请稍后重试")
 		return
 	}
-	response.OK(c, gin.H{"items": items})
+	// 管理面数据，别让代理/Nginx 缓存住"上一次的价"。
+	c.Header("Cache-Control", "private, no-store")
+	response.OK(c, res)
 }
 
 // ---- 内部工具 ----
@@ -1083,6 +1093,8 @@ func toAdminModelItem(m *model.Model, v pricing.VendorItem, bindings int64, base
 		ContextWindow: m.ContextWindow, MaxOutputTokens: m.MaxOutputTokens,
 		Version:  m.Version,
 		Bindings: bindings,
+
+		PresetGroup: m.PresetGroup,
 	}
 }
 

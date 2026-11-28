@@ -771,8 +771,10 @@ func New() *gin.Engine {
 	// 删掉会让这些实体静默退回首字占位（见 model/icon.go）。
 	admin.GET("/icons", controller.ListAdminIcons)
 	admin.POST("/icons", controller.UploadAdminIcon)
-	admin.GET("/upstream/sources", controller.ListUpstreamSources)
-	admin.POST("/upstream/preview", controller.PreviewUpstream)
+	// 上游参考价查询（只读）：模型编辑弹窗里的「上游参考价」面板用它。
+	// 上游只保留这一条：全量差异预览那条链路没有任何回填通道（看完只能手抄），
+	// 已连同它的来源登记端点一起删除，不要在原路径上"补回来"。
+	admin.GET("/upstream/search", controller.SearchUpstream)
 
 	// 文档工作台（v7）：节点 → 接口 → 字段/响应/示例。
 	//
@@ -822,6 +824,9 @@ func New() *gin.Engine {
 	admin.PUT("/channel/status", controller.SetChannelStatus)
 	admin.POST("/channel/test", controller.TestChannel)
 	admin.GET("/adapters", controller.ListAdminAdapters)
+	// 出厂预设：恢复内置渠道/模型（dry_run 预览 → confirm=RESTORE 执行）。
+	// 与渠道写接口分开命名，避免被当成"批量改渠道"的通用入口。
+	admin.POST("/presets/restore", controller.RestorePresets)
 
 	// 平台形状目录（单一真相源）：模态 / 计费方式矩阵 / 可声明端点 / 计价格字段 /
 	// 档位白名单 / 内置适配器能力 / 限额。前端下拉与 AI 编排提示词都读它。

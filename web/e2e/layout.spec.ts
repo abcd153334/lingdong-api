@@ -313,7 +313,8 @@ test.describe("M6 栅格契约：display:grid 且列数随断点收敛", () => {
       expect(box.wsW, `${width}px 工作区应吃满内容宽`).toBe(box.contentW);
       // 两栏左右并排：右栏 = 剩余宽度（≤899 左栏转抽屉，右栏独占）
       if (width > 899) {
-        expect(box.railW, `${width}px 左栏应定宽`).toBeGreaterThanOrEqual(240);
+        // 200px 是卡片能读的下限（见 model-service.css 文件头的宽度算式），不再是 300/260
+        expect(box.railW, `${width}px 左栏应定宽`).toBe(200);
         expect(box.railW + box.mainW, `${width}px 两栏合计应等于工作区`).toBe(box.wsW);
       } else {
         expect(box.mainW, `${width}px 右栏应独占`).toBe(box.wsW);

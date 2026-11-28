@@ -30,9 +30,11 @@ import (
 type channelReq struct {
 	Name string `json:"name"`
 	// Icon 为 nil 表示不修改；显式 "" 表示清空（回到首字占位）。
-	Icon           *string  `json:"icon"`
-	AdapterID      string   `json:"adapter_id"`
-	BaseURL        string   `json:"base_url"`
+	Icon      *string `json:"icon"`
+	AdapterID string  `json:"adapter_id"`
+	BaseURL   string  `json:"base_url"`
+	// Website 为 nil 表示不修改；显式 "" 表示清空（回到适配器默认官网）。
+	Website        *string  `json:"website"`
 	MultiKeyMode   string   `json:"multi_key_mode"`
 	Groups         []string `json:"groups"`
 	Weight         *int     `json:"weight"`
@@ -77,6 +79,8 @@ type adapterItem struct {
 	// DefaultBaseURL 是该适配器的渠道默认 Base URL（空 = 无默认值，必须由运营填写）。
 	// 前端在切换适配器时用它预填，避免运营把 /api/v3 之类的前缀漏掉。
 	DefaultBaseURL string `json:"default_base_url"`
+	// Website 是该适配器的默认上游官网（空 = 无默认值）。渠道表单用它做占位与跳转兜底。
+	Website string `json:"website"`
 	// Endpoints 只在规格项上有值：内置适配器没有"声明端点"的能力，
 	// 现编一份就是第二套事实，所以内置项恒为空数组。
 	Endpoints []string `json:"endpoints"`
@@ -118,6 +122,7 @@ func adaptersView(base string) []adapterItem {
 			SupportsDeclarative: relay.SupportsDeclarativeConfig(a.Name()),
 			SupportsOptions:     relay.SupportsAdapterOptions(a.Name()),
 			DefaultBaseURL:      meta.DefaultBaseURL,
+			Website:             meta.Website,
 			Endpoints:           []string{},
 			IconURL:             iconref.URL(base, meta.Icon),
 		})
@@ -349,6 +354,8 @@ func parseChannelReq(c *gin.Context, forCreate bool) (channel.Req, bool) {
 	req.Icon = body.Icon
 	req.AdapterID = body.AdapterID
 	req.BaseURL = body.BaseURL
+	// nil 透传 = 不修改；显式 "" = 清空（回到适配器默认）。
+	req.Website = body.Website
 	req.MultiKeyMode = body.MultiKeyMode
 	req.Groups = body.Groups
 	req.Keys = body.Keys

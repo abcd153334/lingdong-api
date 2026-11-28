@@ -4,6 +4,7 @@ import { toast } from "sonner";
 import { ChannelKeysSection } from "@/components/admin/ChannelKeysSection";
 import { Drawer } from "@/components/common/Drawer";
 import { Field } from "@/components/common/Field";
+import { Icon } from "@/components/common/Icon";
 import { IconNameField } from "@/components/common/IconNameField";
 import { SegmentedChips } from "@/components/common/SegmentedChips";
 import { Select } from "@/components/common/Select";
@@ -94,6 +95,13 @@ interface ChannelForm {
   iconUrl: string;
   adapterId: string;
   baseUrl: string;
+  /**
+   * 上游官网（展示/跳转用，不参与请求）。
+   *
+   * 空串 = 使用适配器默认官网；提交时恒带（空串 = 清空），否则"删掉官网"
+   * 会变成"保持不变"。与 icon 的语义完全一致。
+   */
+  website: string;
   keysText: string;
   multiKeyMode: MultiKeyMode;
   /** 失败时换同渠道另一把密钥重试（默认关 = 与改造前一致） */
@@ -125,6 +133,7 @@ const emptyForm = (mode: MultiKeyMode = "random"): ChannelForm => ({
   iconUrl: "",
   adapterId: "openai",
   baseUrl: "",
+  website: "",
   keysText: "",
   multiKeyMode: mode,
   switchKeyRetry: false,
@@ -148,6 +157,8 @@ const formFromChannel = (ch: ChannelItem): ChannelForm => ({
   iconUrl: ch.icon_url ?? "",
   adapterId: ch.adapter_id,
   baseUrl: ch.base_url,
+  // 必须回填「自己配置的值」而不是有效值：把适配器默认写回输入框等于把继承固化成自定义。
+  website: ch.website ?? "",
   keysText: "",
   multiKeyMode: ch.multi_key_mode,
   switchKeyRetry: ch.switch_key_retry ?? false,
@@ -325,6 +336,17 @@ export function ChannelForm({
   }, [duomiBuild]);
 
   const adapterMeta = adapters.find((a) => a.id === form.adapterId);
+  /**
+   * 可跳转的官网：当前输入合法就用它，否则回落到「已保存的有效值 / 适配器默认」。
+   *
+   * 半截输入（"http"、"example.com"）不渲染按钮：渲染出来就是一个死链，
+   * 而运营会以为"填了但保存不了"是浏览器问题。
+   */
+  const websiteHref = (() => {
+    const typed = form.website.trim();
+    if (/^https?:\/\/[^\s]+$/i.test(typed)) return typed;
+    return channel?.website_url || adapterMeta?.website || "";
+  })();
   // 桩件/旧接口可能不下发该字段：按前缀兜底（规格渠道的鉴权与路径由规格 JSON 管理）。
   const declDisabled = !(adapterMeta?.supports_declarative ?? !form.adapterId.startsWith("spec:"));
   // 私有配置**不做兜底推断**：形状由适配器定义，猜错就是"配了没人读"。
@@ -383,6 +405,8 @@ export function ChannelForm({
     if (!form.adapterId.trim()) return toast.error("请选择适配器");
     if (!/^https?:\/\//.test(form.baseUrl.trim()))
       return toast.error("Base URL 需以 http:// 或 https:// 开头");
+    if (form.website.trim() && !/^https?:\/\/[^\s]+$/i.test(form.website.trim()))
+      return toast.error("官网需以 http:// 或 https:// 开头");
     if (!form.groups.length) return toast.error("至少选择一个可用分组");
 
     // 新建：按行解析、逐行报错（密钥内部有空格、脱敏指纹、重复都由 parseKeyLines 判）。
@@ -419,6 +443,8 @@ export function ChannelForm({
       icon: form.icon,
       adapter_id: form.adapterId.trim(),
       base_url: form.baseUrl.trim(),
+      // 恒提交（含空串 = 清空）：省略等于「保持不变」，删掉官网就永远不生效。
+      website: form.website.trim(),
       multi_key_mode: form.multiKeyMode,
       switch_key_retry: form.switchKeyRetry,
       groups: [...form.groups],
@@ -508,15 +534,45 @@ export function ChannelForm({
                 : undefined
             }
           >
-            <input
-              id="chz-url"
-              type="text"
-              placeholder={adapterMeta?.default_base_url || "https://api.openai.com"}
-              value={form.baseUrl}
-              onChange={(e) => setField("baseUrl", e.target.value)}
-            />
+            {/* 官网跳转与 Base URL 并排：运营看到上游地址的那一刻，最可能想核对
+                上游是谁。有效官网为空时整块不渲染（不留一个点了没反应的灰按钮）。 */}
+            <div className="field-row">
+              <input
+                id="chz-url"
+                type="text"
+                placeholder={adapterMeta?.default_base_url || "https://api.openai.com"}
+                value={form.baseUrl}
+                onChange={(e) => setField("baseUrl", e.target.value)}
+              />
+              {websiteHref ? (
+                <a
+                  className="field-row__go"
+                  href={websiteHref}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  aria-label="打开上游官网"
+                  title={websiteHref}
+                >
+                  <Icon name="external" size={15} />
+                </a>
+              ) : null}
+            </div>
           </Field>
         </div>
+
+        <Field
+          label="官网"
+          htmlFor="chz-site"
+          hint={adapterMeta?.website ? "留空 = 使用适配器默认官网" : undefined}
+        >
+          <input
+            id="chz-site"
+            type="text"
+            placeholder={adapterMeta?.website || "https://example.com"}
+            value={form.website}
+            onChange={(e) => setField("website", e.target.value)}
+          />
+        </Field>
 
         {channel ? (
           // 编辑态：密钥池平铺在抽屉里，**不再开第二层抽屉**。

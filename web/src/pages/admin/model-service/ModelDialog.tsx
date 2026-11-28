@@ -9,6 +9,7 @@ import { IconNameField } from "@/components/common/IconNameField";
 import { Select } from "@/components/common/Select";
 import { SwitchRow } from "@/components/common/SwitchRow";
 import { confirmDialog } from "@/components/common/ConfirmDialog";
+import { LANE_CN, PriceRefDialog } from "./PriceRefDialog";
 import {
   useCreateAdminModelMutation,
   useDeleteAdminModelMutation,
@@ -94,6 +95,8 @@ export function ModelDialog({
   });
   /** 新建时的那一条绑定（编辑态不用它 —— 绑定在列表行内单独改）。 */
   const [binding, setBinding] = useState({ upstream: "", weight: "1" });
+  /** 上游参考价面板（底栏左侧入口）。 */
+  const [refOpen, setRefOpen] = useState(false);
 
   // 打开时按目标重建。用 ref 记住"为谁打开"，不把 model 放进依赖：
   // 列表失效会换掉对象引用，依赖它会在编辑中途重置草稿。
@@ -101,11 +104,15 @@ export function ModelDialog({
   useEffect(() => {
     if (!open) {
       openedFor.current = "";
+      // 父弹窗关掉时内层面板必须一起关：它常驻挂载（关闭动画依赖节点保留），
+      // 不主动复位就会在下次打开时带着上一次的搜索词与结果。
+      setRefOpen(false);
       return;
     }
     const key = model ? `e:${model.id}` : "n";
     if (openedFor.current === key) return;
     openedFor.current = key;
+    setRefOpen(false); // 换模型同理：A 的价不能出现在 B 的面板里
     setForm(model ? formFromModel(model) : emptyForm(vendors[0]?.id ?? ""));
     setNewTier({ which: "", value: "" });
     setBinding({ upstream: "", weight: "1" });
@@ -295,6 +302,13 @@ export function ModelDialog({
   })();
 
   const submitModel = async () => {
+    // 页面级不变式的最后一道闸：模型必须与一条渠道的初始绑定**同事务**创建。
+    // 全部模型视图已经不给「新建」入口，但真值只在这里说一次 —— 以后谁再加一个
+    // 没有渠道上下文的入口，都不会静默生产出"绑不上、也用不了"的孤儿模型。
+    if (!editingId && !channel) {
+      toast.error("模型必须挂在渠道上创建：请先在左栏选择渠道");
+      return;
+    }
     const id = form.id.trim();
     if (!id) {
       toast.error("模型 ID 必填");
@@ -348,11 +362,19 @@ export function ModelDialog({
       // 从某条渠道里新建：同一事务里绑上它。
       // 上游名留空 = 与模型同名（后端 normalizeBindings 的既有规则），
       // 这里**不填默认值**：上游改名是少数情况，预填一串同样的字符只会让人以为要改。
+      //
+      // 权重不兜底：`Number(x) || 1` 会把 0 / 空输入静默改成 1 —— 运营填 0 想"不分流"，
+      // 保存出来却是 1，而且提示里什么都没有。与 `BindDialog` 同一口径：≥ 1 的整数。
+      const weight = Number(binding.weight.trim());
+      if (!Number.isInteger(weight) || weight < 1) {
+        toast.error("权重需为 ≥ 1 的整数");
+        return;
+      }
       body.initial_binding = {
         channel_id: channel.id,
         // 留空 = 与模型 ID 同名（后端不猜，空值 400）
         upstream_model: binding.upstream.trim() || id,
-        weight: Number(binding.weight) || 1,
+        weight,
         enabled: true,
       };
     }
@@ -477,6 +499,7 @@ export function ModelDialog({
   };
 
   return (
+      <>
       <Dialog
         open={open}
         onClose={onClose}
@@ -502,7 +525,20 @@ export function ModelDialog({
             onClick: submitModel,
           },
         ]}
+        footerStart={
+          <button type="button" className="btn" onClick={() => setRefOpen(true)}>
+            上游参考价
+          </button>
+        }
       >
+        {/* 渠道视图里编辑的是**全局**模型：不说明的话，"在这里改价"很容易被理解成
+            "只改当前渠道的价"（真正的渠道级配置是绑定自己的上游名/权重/启停）。 */}
+        {editingId && channel ? (
+          <p className="ms-note muted small">
+            模型与价格是全局的，保存后对「{channel.name}」及其他所有渠道同时生效；本渠道的上游名 /
+            权重 / 启停请在列表行内用「绑定设置」修改。
+          </p>
+        ) : null}
         <div className="form-grid">
           {/* 身份区：图标 + 名称同一行（左图右文），模型 ID 与供应商随后。
              不用 tip/hint：UI 契约门禁对 Tip/Hint 有基线棘轮，这里靠 placeholder 表达即可。 */}
@@ -1121,5 +1157,27 @@ export function ModelDialog({
           />
         </div>
       </Dialog>
+
+      {/* 兄弟节点而不是塞进 .dl-body：内层自己 portal 到 body，放进表单里会被
+          .dl-body 的 overflow 裁掉（而且下次有人去掉 portal 就出事故）。 */}
+      <PriceRefDialog
+        open={refOpen}
+        onClose={() => setRefOpen(false)}
+        initialKeyword={(model?.binding?.upstream_model || form.id || form.display_name || "").trim()}
+        vendor={form.vendor}
+        fillable={form.billing_mode === "tokens"}
+        onFill={(lane, micro, item) => {
+          const before = form.prices[lane];
+          const next = microToInput(micro);
+          // 只改表单 state，不提交：保存仍走既有 PUT + 版本乐观锁，审计也仍是 model.update。
+          setPrice(lane, next);
+          toast(
+            before
+              ? `${item.name} ${LANE_CN[lane]}：${before} → ${next}（保存后生效）`
+              : `${item.name} ${LANE_CN[lane]}：${next}（保存后生效）`,
+          );
+        }}
+      />
+      </>
   );
 }

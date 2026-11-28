@@ -115,28 +115,16 @@ type Env struct {
 	// 默认关闭且 fail-closed 返回 404：没配口令时不能给公网留一个可以任意睡的端点。
 	DiagHoldToken string
 
-	// SeedEnabled 控制是否写入「演示/开通态」数据（默认 true = 与历史行为一致）。
+	// BuiltinPresets 控制「出厂预设」这一整套能力（默认 true）。
 	//
-	// 关掉之后：seedVendors/seedModels/seedChannels/seedBindings/seedPackages 全部跳过，
-	// 以及 RunMigrations 里会**自动建渠道**的三条开通迁移（ensureAutoDL / ensureMetaso /
-	// ensureDuoMi / ensureDuoMiMultimodal）也跳过。
+	// 一个开关、三个消费点，语义必须一致：
+	//   - 启动时 `presets.Seed` 按组写入内置渠道/模型/绑定（**全部停用、空密钥**）；
+	//   - 启动时 `presets.Adopt` 把老库里匹配上的运营行认领为内置（只补标记）；
+	//   - 管理台「恢复出厂」把内置行拉回出厂值（关掉时直接拒绝，不绕过 Seed 建行）。
 	//
-	// 为什么需要一个总开关而不是只修 seed：那几条迁移是「存量库补齐」语义，
-	// 每次启动无条件跑，运营在管理台把 demo 渠道删干净后重启就会**原地复活**
-	// （空密钥 + 停用态，选路选不中、列表里却永远清不掉）。真实接渠道时
-	// 必须能把自动开通彻底关掉，否则「清空重建」这个动作在重启后立刻失效。
-	//
-	// 注意：seedAdmin / seedSystemConfig / SeedModalityDefaults **不受它影响** ——
-	// 没有管理员和系统配置的库是不可用的；而且它们都是 OnConflict{DoNothing}，不会覆盖运营配置。
-	SeedEnabled bool
-
-	// BuiltinPresets 控制是否写入「内置厂商预设」（默认 true）。
-	//
-	// 与 SeedEnabled 的**语义差异**（两者不能合并）：
-	//   - SeedEnabled 管的是"演示数据"（能删、删了不复活的只有渠道）；
-	//   - BuiltinPresets 管的是"真实可用的内置模型/渠道骨架"，写入时**默认全部停用**，
-	//     由运营在管理台确认价格与密钥后自行启用。
-	// 合并成一个开关的后果：想关演示数据就顺带丢了内置预设，想留内置预设就得忍受演示数据。
+	// 关掉它 = 这台实例不要任何出厂内容（自定义发行版、或已有自己的初始化流程）。
+	// 由此**不再有第二个"演示数据"开关**：历史上那个会把一条假密钥渠道写进启用态，
+	// 与出厂预设重复表达同一件事，且运营无法区分哪条是假的（已整体删除）。
 	BuiltinPresets bool
 
 	// ---- 认证（Cookie 会话）----
@@ -243,7 +231,6 @@ func Load() Env {
 
 		DiagHoldToken: strings.TrimSpace(os.Getenv("LD_DIAG_HOLD_TOKEN")),
 
-		SeedEnabled:    getenvBool("LD_SEED_ENABLED", true),
 		BuiltinPresets: getenvBool("LD_BUILTIN_PRESETS", true),
 
 		// CookieSecure 只作为粗粒度判断（prod 视为 true）；真正写 Cookie 用 CookieSecureMode。

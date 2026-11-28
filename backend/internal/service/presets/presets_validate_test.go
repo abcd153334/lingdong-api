@@ -23,12 +23,17 @@ import (
 func TestPresetSpecPassesModelBuild(t *testing.T) {
 	for _, g := range presetGroups() {
 		for _, s := range g.Models {
+			mode := s.BillingMode
+			if mode == "" {
+				mode = model.BillingModeSpec
+			}
 			in := modelcfg.Input{
 				ID: s.ID, DisplayName: spPreset(s.DisplayName), Vendor: g.Vendor.ID, Modality: s.Modality,
-				BillingMode: model.BillingModeSpec, BillingModeSet: true,
+				BillingMode: mode, BillingModeSet: true,
 				Endpoints: s.Endpoints, EndpointsSet: true,
 				Capabilities: apidoc.CapKeys(s.Caps), CapabilitiesSet: true,
-				SpecPrices: s.Spec, SpecPricesSet: true,
+				Prices:     s.Prices,
+				SpecPrices: s.Spec, SpecPricesSet: mode == model.BillingModeSpec,
 			}
 			if _, err := modelcfg.Build(in); err != nil {
 				t.Fatalf("%s/%s 的预设过不了管理台校验：%v", g.MarkerKey, s.ID, err)

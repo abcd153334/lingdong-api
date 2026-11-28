@@ -108,6 +108,36 @@ func TestCreateChannelPersistsAdapterConfig(t *testing.T) {
 	}
 }
 
+// TestCreateChannelPersistsWebsite 守 DTO 的 website 字段透传。
+//
+// DTO 少一个字段时 ShouldBindJSON 不报错、字段静默丢失 —— 表现是"保存成功，
+// 但官网按钮永远不出现"，只有打开这一段才能发现。
+func TestCreateChannelPersistsWebsite(t *testing.T) {
+	withDeclChannelDB(t)
+
+	code, body := postCreateChannel(t, channelBodyWith(`,"website":"https://duomiapi.com"`))
+	if code != http.StatusOK {
+		t.Fatalf("创建应成功，实际 %d：%s", code, body)
+	}
+	var payload struct {
+		Data struct {
+			Item struct {
+				Website    string `json:"website"`
+				WebsiteURL string `json:"website_url"`
+			} `json:"item"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal([]byte(body), &payload); err != nil {
+		t.Fatalf("响应不是合法 JSON：%v / %s", err, body)
+	}
+	if payload.Data.Item.Website != "https://duomiapi.com" {
+		t.Fatalf("website 未透传，实际：%s", body)
+	}
+	if payload.Data.Item.WebsiteURL != "https://duomiapi.com" {
+		t.Fatalf("website_url 未派生，实际：%s", body)
+	}
+}
+
 func TestCreateChannelRejectsBadAdapterConfig(t *testing.T) {
 	withDeclChannelDB(t)
 

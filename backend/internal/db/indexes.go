@@ -57,6 +57,12 @@ var indexes = []struct {
 		sql:  `CREATE INDEX IF NOT EXISTS idx_model_bindings_channel ON model_bindings (channel_id)`,
 	},
 	{
+		// 出厂预设「恢复出厂」按 preset_group 扫。部分索引只收内置行：
+		// models 是万级表，而内置行只有几十条，普通索引在这里纯属浪费。
+		name: "idx_models_preset_group",
+		sql:  `CREATE INDEX IF NOT EXISTS idx_models_preset_group ON models (preset_group) WHERE preset_group <> ''`,
+	},
+	{
 		// 适配器页按 adapter_id 统计渠道数、渠道列表关键词前缀匹配；
 		// 文档投影按 `spec:<slug>` 反查规格（docdocs.attachSpecRequests）也走它。
 		name: "idx_channels_adapter",

@@ -67,30 +67,26 @@ export function apiDocsSearch(search: Record<string, unknown>): ApiDocsSearch {
 }
 
 /* ============================================================
-   模型服务：`?a=<适配器 id>&c=<渠道 id>`
+   模型服务：`?c=<渠道 id>`
    ------------------------------------------------------------
    只放"当前在看哪条渠道"这一位：它是唯一值得发给同事的状态
    （"你看一下这条渠道的模型"）。搜索/筛选/分页**不进 URL** —— 那属于当前会话的
    浏览状态，进了 URL 会让"发给同事"变成"把我的筛选项也塞给他"。
+
+   **`?a` 已移除**（2026-11 左栏改成「适配器卡片 + 渠道浮层」）：`a` 原本表达
+   "展开哪个组"，组已经不存在了；浮层开在哪是瞬态，进 URL 反而要额外定义
+   "a 与 c 冲突时谁优先"、"关抽屉后 a 残留"、"孤儿桶的第三个参数"三条新规则。
+   旧链接带 `?a=` 会被静默忽略（这里只挑 c），不会报错也不会串状态。
    ============================================================ */
 
 export type ModelServiceSearch = {
-  /** 展开的适配器（`openai` / `spec:<slug>`）；空表示由页面自己选第一个有渠道的 */
-  a?: string;
-  /** 选中的渠道 id（正整数）；空表示未选中，右栏显示引导态 */
+  /** 选中的渠道 id（正整数）；空 = 全部模型 */
   c?: number;
   [k: string]: unknown;
 };
 
-/** 适配器 id 的形态：内置注册名或 `spec:<slug>`。 */
-const ADAPTER_ID = /^(spec:)?[a-z0-9][a-z0-9._-]*$/;
-
 export function modelServiceSearch(search: Record<string, unknown>): ModelServiceSearch {
   const next: ModelServiceSearch = {};
-  // 用白名单而不是"非空就收"：`?a=<script>` 会进 DOM（选中判断与 data 属性），
-  // 而它来自 URL —— 唯一的不可信输入。
-  const a = toTabValue(search.a);
-  if (ADAPTER_ID.test(a)) next.a = a;
   const cid = Number(toTabValue(search.c));
   if (Number.isSafeInteger(cid) && cid > 0) next.c = cid;
   return next;
