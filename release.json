@@ -1,0 +1,11 @@
+{
+  "schema": 1,
+  "latest": {
+    "version": "v2.3.2",
+    "tag": "v2.3.2",
+    "published_at": "2026-11-28",
+    "notes": "fix(deploy): 升级后补写 .release 记账，并在编排未对齐时明确告警",
+    "commit": "1e525e85a6c6f80f8e2d9ccce134391cdcc3fa1a",
+    "url": "https://github.com/abcd153334/lingdong-api/releases/tag/v2.3.2"
+  }
+}
