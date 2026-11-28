@@ -205,22 +205,25 @@ fetch → 校验 tag → 查脏工作区 → 记回退镜像 → 磁盘检查
 开箱即可检查更新；fork 后想跟自己的发布，在「系统配置 → 版本与更新」里换地址，
 填 `off` 则彻底关闭（连自动检查也不出站）。
 
-### C. 发一个版本（开发者）
+### C. 用自己的镜像
+
+`ld.sh up` 与 `upgrade.sh` 默认拉 `ghcr.io/abcd153334/lingdong-api:<TAG>` 预构建镜像。
+想换成自己构建的，两种做法：
 
 ```bash
-git tag v2.2.8 && git push origin v2.2.8
+# 1) 本地构建并记账（不推送任何仓库），之后的 up / upgrade 就用这个 TAG
+bash deploy/scripts/tag-release.sh v1.0.0
+
+# 2) 推到自己的镜像仓库：在 deploy/.env 里改 LD_IMAGE，再正常 up / upgrade
+LD_IMAGE=registry.example.com/you/lingdong-api
 ```
 
-推 `v*` 标签会触发一次构建，同时产出两样东西：
+镜像由 `deploy/Dockerfile` 单文件多阶段构建，前端静态资源 `go:embed` 进二进制，
+所以产出只有一个应用镜像（没有独立的 web 容器，也没有 nginx）。
 
-| 产物 | 位置 |
-|---|---|
-| 镜像 | `ghcr.io/abcd153334/lingdong-api:v2.2.8` + `:latest`（amd64/arm64） |
-| 清单 | `raw.githubusercontent.com/abcd153334/lingdong-api/release-manifest/release.json` |
-
-**不要再手工跑 `gen-release-manifest.sh` 上传**：那是离线 / 自建发布渠道才需要的。
-清单里 `commit` 与镜像的 `VERSION` 都取自同一个 tag，所以"清单说有新版"与
-"拉到的镜像版本号"天然一致。
+清单地址同样可以指向你自己的：管理台「系统配置 → 版本与更新」改地址，
+或填 `off` 关闭检查。判据只有一条 —— 清单里的 `commit` 必须与被拉取镜像的
+`VERSION` 同源，否则会出现"说有新版但装上去版本号没变"。
 
 ---
 

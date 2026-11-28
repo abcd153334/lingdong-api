@@ -60,7 +60,7 @@ curl -fsS http://127.0.0.1:8088/api/health
 | 回滚 | `bash deploy/scripts/upgrade.sh <旧TAG> --no-backup`（`data_epoch` 变过须连带恢复备份） |
 | 备份 / 恢复 | `bash deploy/scripts/backup.sh` / `bash deploy/scripts/restore.sh` |
 | 健康检查 | `bash deploy/scripts/healthcheck.sh --expect-version <TAG> --require-db` |
-| 打标签发布 | `bash deploy/scripts/tag-release.sh <TAG>` |
+| 本地构建镜像 | `bash deploy/scripts/tag-release.sh <TAG>`（构建 + 记账，不推送） |
 | 一键更新代理 | `deploy/agent/install.sh`（systemd 常驻，不挂 `docker.sock` 进 Web） |
 
 ## 开发与构建
@@ -107,38 +107,3 @@ bash scripts/check-repo-hygiene.sh
 
 它做白名单校验、敏感值扫描（含藏在预签名 URL 里的云厂商 AK）与误产物识别，
 是「哪些文件能进仓库」的唯一判据。
-
-## 发布新版本
-
-改完代码，一条命令：
-
-```bash
-bash scripts/release.sh "修登录页按钮错位"
-```
-
-它按固定顺序做五件事，任何一步失败就停：跑门禁 → 提交 → 推代码 → 自动算下一个
-版本号（`v2.2.14` → `v2.2.15`）→ 打 tag 并推送。`--minor` / `--major` 换递增位，
-`--no-tag` 只推代码不发版本，`--dry-run` 只看会做什么。
-
-**为什么顺序不能颠倒**：先推 tag 后推代码，等于发布一个云端还不存在的版本 ——
-CI 找不到那个 commit，用户端会拿到一个永远装不上的更新。脚本把这条顺序写死了。
-
-**重复执行是安全的**：没有改动时它直接拒绝，不会凭空多一个版本号（否则误按一次
-回车就多一轮 CI，用户还会收到一条"有新版本"却什么都没变的提示）。
-
-推完 tag 就不用管了，CI 会自动产出双架构镜像与发布清单（2–11 分钟）：
-
-```
-https://github.com/abcd153334/lingdong-api/actions
-```
-
-之后新装的用户直接拿到新版本；已在跑的用户 6 小时内看到「有新版本」提示，
-点一下就更新。
-
-手工等价（脚本坏了也不至于卡住）：
-
-```bash
-git add -A && git commit -m "说明" && git push origin main
-git tag -a v2.2.15 -m "说明" && git push origin v2.2.15
-```
-
